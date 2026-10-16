@@ -8,11 +8,13 @@ sources, scans) is redirected into tmp dirs by ``tests/conftest.py``.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 tk = pytest.importorskip("tkinter")
 
-from tests.fixtures import VLESS_TLS_WS, TROJAN_TLS  # noqa: E402
+from tests.fixtures import VLESS_TLS_WS, VLESS_REALITY, TROJAN_TLS  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -89,6 +91,82 @@ def test_apply_test_result_formats_row(app):
     assert app.test_tree.set(iid, "tcp") == "12"
     assert app.test_tree.set(iid, "tls") == "—"
     assert app.test_tree.set(iid, "cc") == "NL"
+
+
+# -------------------------------------------------------------------- editor
+
+def test_editor_loads_reality_fields(app):
+    _feed(app, VLESS_REALITY)
+    assert app.ed_scheme_var.get() == "vless"
+    assert app.ed_security_var.get() == "reality"
+    assert app.ed_pbk_var.get() == "SbVKOEMjK0sIlbwg4akyBg5mL5KZwwB-ed4eEE7YnRc"
+    assert app.ed_sid_var.get() == "6ba85179"
+    assert app.ed_flow_var.get() == "xtls-rprx-vision"
+    # the raw JSON pane mirrors the loaded Outbound
+    data = json.loads(app.ed_json_txt.get("1.0", "end-1c"))
+    assert data["public_key"] == app.ed_pbk_var.get()
+    assert data["security"] == "reality"
+
+
+def test_editor_apply_rewrites_output_line(app):
+    _feed(app, VLESS_REALITY)
+    app.ed_port_var.set("8443")
+    app.ed_name_var.set("edited-node")
+    app._editor_apply()
+    line = app.output_txt.get("1.0", "end-1c").splitlines()[0]
+    assert ":8443" in line and "edited-node" in line
+    # tester targets and names follow the edit
+    assert app._targets[0].port == "8443"
+    assert any(n == "edited-node" for n, _l in app._name_lines)
+    # the picker label reflects the new name
+    assert "edited-node" in app.ed_pick_cb.cget("values")[0]
+
+
+def test_editor_json_roundtrip(app):
+    _feed(app, VLESS_TLS_WS)
+    data = json.loads(app.ed_json_txt.get("1.0", "end-1c"))
+    data["path"] = "/viajson"
+    data["flow"] = "xtls-rprx-vision"
+    app.ed_json_txt.delete("1.0", "end")
+    app.ed_json_txt.insert("1.0", json.dumps(data))
+    app._editor_from_json()
+    assert app.ed_path_var.get() == "/viajson"
+    assert app.ed_flow_var.get() == "xtls-rprx-vision"
+    app._editor_apply()
+    line = app.output_txt.get("1.0", "end-1c").splitlines()[0]
+    assert "%2Fviajson" in line and "flow=xtls-rprx-vision" in line
+
+
+def test_editor_xhttp_mode_roundtrip(app):
+    _feed(app, VLESS_TLS_WS)
+    app.ed_transport_var.set("xhttp")
+    app.ed_mode_var.set("stream-one")
+    app._editor_apply()
+    line = app.output_txt.get("1.0", "end-1c").splitlines()[0]
+    assert "type=xhttp" in line and "mode=stream-one" in line
+    assert app._targets[0].extra["mode"] == "stream-one"
+
+
+def test_editor_form_to_json(app):
+    _feed(app, VLESS_REALITY)
+    app.ed_pbk_var.set("NEWKEY=")
+    app._editor_to_json()
+    data = json.loads(app.ed_json_txt.get("1.0", "end-1c"))
+    assert data["public_key"] == "NEWKEY="
+
+
+def test_editor_bad_json_reports_error(app):
+    _feed(app, VLESS_TLS_WS)
+    app.ed_json_txt.delete("1.0", "end")
+    app.ed_json_txt.insert("1.0", "{not json")
+    app._editor_from_json()
+    assert "bad JSON" in app.ed_status_var.get()
+
+
+def test_editor_refresh_clears_without_configs(app):
+    _feed(app, "this is not a config line")
+    assert app._editor_items == []
+    assert "no convertible config" in app.ed_status_var.get()
 
 
 # ----------------------------------------------------------- subscriptions

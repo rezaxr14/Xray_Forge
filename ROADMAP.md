@@ -41,8 +41,15 @@ from code, never hard-coded.
   httpupgrade / tcp / **xhttp**, TLS/Reality with fingerprint, alpn,
   cipherSuites, spiderX, flow, front-domain override).
 - ✅ `xray_bridge` kept as a compat façade; old call-sites unchanged.
-- 🟡 GUI: add Reality / XHTTP / flow fields to the converter editor and a
-  raw-JSON round-trip editor (core APIs are ready; UI work remains).
+- ✅ GUI **✎ Editor** tab: pick any output config and edit its fields —
+  Reality (pbk / sid / spx), XHTTP (`type` + `mode`), flow, fp/alpn/cs,
+  transport, security — plus a raw-JSON pane that round-trips through
+  `Outbound.from_dict` (extra protocol params included). "apply" regenerates
+  the share link via the protocol handler and rewrites that output line,
+  the names list and the tester targets. Round-trip fidelity fixes that
+  fell out of it: `headerType` / `allowInsecure` are parsed again (query
+  keys are lowercased — they were silently dropped) and `mode=` / those
+  params survive `to_uri` for vless + trojan.
 
 ## Phase 2 — patterniha-style techniques 🟡
 
@@ -113,12 +120,13 @@ pass latency checks while being unusable.
 
 ## Phase 6 — Quality 🟡
 
-- ✅ Test suite: 127 tests — per-protocol fixtures + round-trips, core
+- ✅ Test suite: 137 tests — per-protocol fixtures + round-trips, core
   capability/client-config tests, golden export structure tests,
   subscription pipeline (ETag/cache/dedup), staged health-check pipeline
   (offline, monkeypatched; incl. core-backed stages), scan sessions
   (resume/export), WARP RFC 7748 vectors, MITM-DF structure, seeded
-  URI-parser fuzzing, CLI end-to-end, GUI interaction tests.
+  URI-parser fuzzing, CLI end-to-end, GUI interaction tests (incl. the
+  per-config Editor: Reality fields, JSON round-trip, xhttp mode).
 - ✅ Release workflow (`.github/workflows/release.yml`): on `v*` tags, runs
   tests, builds Windows/Linux single-file executables with PyInstaller,
   generates SHA-256 checksums, attaches to a GitHub Release.

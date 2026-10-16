@@ -41,6 +41,8 @@ from xray_forge.core.parser import (
     export_to_clash, export_to_singbox, export_to_sub,
 )
 from xray_forge.core.settings import load_settings, save_settings
+from xray_forge.core.models import Outbound
+from xray_forge.core.protocols import handler_for
 from xray_forge.core.subscription import fetch_subscription
 from xray_forge.core.dedup import dedup_configs
 from xray_forge.core.prober_utils import cc_cell as _cc_cell, cc_flag as _cc_flag
@@ -63,6 +65,7 @@ from xray_forge.core.xray_bridge import (
 from xray_forge.ui.widgets import Tooltip, Switch
 from xray_forge.ui.tabs.converter_tab import build_rules, build_naming, build_override
 from xray_forge.ui.tabs.converter_tab import build as build_converter_pane
+from xray_forge.ui.tabs.editor_tab import build as build_editor
 from xray_forge.ui.tabs.tester_tab import build as build_tester
 from xray_forge.ui.tabs.xray_tab import build as build_xray_tab
 from xray_forge.ui.tabs.scanner_tab import build as build_scanner
@@ -146,6 +149,9 @@ class App(tk.Tk):
         self._sub_reports: list = []
         self._sub_stop = threading.Event()
         self._subs_checking = False
+        # editor (per-config field editor + raw JSON round-trip)
+        self._editor_items: list[tuple[int, str, Outbound]] = []
+        self._editor_sel: int | None = None
         self.HAS_CURL_CFFI = HAS_CURL_CFFI
         # settings
         self._settings = load_settings()
@@ -282,6 +288,8 @@ class App(tk.Tk):
         build_rules(a)
         build_naming(a)
         build_override(a)
+
+        build_editor(a)  # adds the "✎ Editor" notebook page (a.edit_tab)
 
         test_tab = tk.Frame(container, background=BG)
         nb.add(test_tab, text="  📡 Tester  ")
@@ -507,6 +515,7 @@ class App(tk.Tk):
             a._set_output([])
             a._set_names([])
             a._set_counts(0, 0, 0)
+            a._editor_refresh()
             a.msg_var.set("paste configs to convert")
             return
         fp = a.fp_var.get().strip()
@@ -541,6 +550,7 @@ class App(tk.Tk):
             a._set_counts(c["fixed"], c["unchanged"], c["skipped"])
             a._targets = [parse_target(l) for l in lines if parse_target(l)]
             a._build_tester_list()
+            a._editor_refresh()
             ep = ""
             if ov_ip or ov_port:
                 ep = f"  ·  endpoint→{ov_ip or 'orig'}:{ov_port or 'orig'}"
@@ -684,6 +694,202 @@ class App(tk.Tk):
             a.cs_entry.configure(state="normal")
             a.fm_entry.configure(state="normal")
         a._schedule()
+
+    # ------------------------------------------------------------------ editor
+    # Per-config field editor (Configs ▸ ✎ Editor): pick a line from the
+    # OUTPUT pane, edit Outbound fields (incl. Reality / XHTTP / flow),
+    # optionally round-trip through the raw JSON, and write the regenerated
+    # share link back into the output.
+    def _editor_out_lines(self) -> list[str]:
+        return self.output_txt.get("1.0", "end-1c").splitlines()
+
+    @staticmethod
+    def _editor_label(out: Outbound) -> str:
+        return (f"{out.name or out.host} · "
+                f"{out.scheme}/{out.transport}/{out.security or 'none'}")
+
+    def _editor_refresh(self, keep_selection: bool = True) -> None:
+        """Re-scan the OUTPUT pane; keeps the selected slot when possible."""
+        a = self
+        prev = a._editor_sel if keep_selection else None
+        a._editor_items = []
+        for i, line in enumerate(a._editor_out_lines()):
+            out = parse_target(line)
+            if out is not None:
+                a._editor_items.append((i, line, out))
+        values = tuple(f"{n + 1} · {a._editor_label(out)}"
+                       for n, (_i, _l, out) in enumerate(a._editor_items))
+        a.ed_pick_cb.configure(values=values)
+        if not a._editor_items:
+            a.ed_pick_var.set("")
+            a._editor_sel = None
+            a.ed_status_var.set("no convertible config in output")
+            return
+        sel = prev if (prev is not None and 0 <= prev < len(a._editor_items)) \
+            else 0
+        a._editor_sel = sel
+        a.ed_pick_cb.current(sel)
+        a._editor_load()
+
+    def _editor_load(self, _event=None) -> None:
+        a = self
+        sel = a._editor_sel
+        if not a._editor_items or sel is None \
+                or not (0 <= sel < len(a._editor_items)):
+            return
+        _idx, _line, out = a._editor_items[sel]
+        a._editor_fill(out)
+        a._editor_json_dump(out)
+        a.ed_status_var.set(f"loaded #{sel + 1} — edit fields, then apply")
+
+    def _editor_fill(self, out: Outbound) -> None:
+        a = self
+        a.ed_scheme_var.set(out.scheme)
+        a.ed_name_var.set(out.name)
+        a.ed_host_var.set(out.host)
+        a.ed_port_var.set(out.port)
+        a.ed_cred_var.set(out.credential)
+        a.ed_transport_var.set(out.transport or "")
+        a.ed_path_var.set(out.path or "/")
+        a.ed_hosthdr_var.set(out.host_header)
+        a.ed_service_var.set(out.service_name)
+        a.ed_hdrtype_var.set(out.header_type)
+        a.ed_mode_var.set(out.extra.get("mode", "") or "")
+        a.ed_security_var.set(out.security or "")
+        a.ed_sni_var.set(out.sni)
+        a.ed_fp_var.set(out.fingerprint)
+        a.ed_alpn_var.set(out.alpn)
+        a.ed_insecure_var.set(bool(out.allow_insecure))
+        a.ed_flow_var.set(out.flow)
+        a.ed_pbk_var.set(out.public_key)
+        a.ed_sid_var.set(out.short_id)
+        a.ed_spx_var.set(out.spider_x)
+        a.ed_cs_var.set(out.extra.get("cs", "") or "")
+        a.ed_scy_var.set(out.encryption or "")
+        a.ed_aid_var.set(out.alter_id or "0")
+
+    def _editor_collect(self) -> Outbound:
+        a = self
+        sel = a._editor_sel
+        base: Outbound | None = None
+        if a._editor_items and sel is not None \
+                and 0 <= sel < len(a._editor_items):
+            base = a._editor_items[sel][2]
+        extra = dict(base.extra) if base else {}
+        for key, var in (("mode", a.ed_mode_var), ("cs", a.ed_cs_var)):
+            val = var.get().strip()
+            if val:
+                extra[key] = val
+            else:
+                extra.pop(key, None)
+        sec = a.ed_security_var.get().strip()
+        return Outbound(
+            scheme=a.ed_scheme_var.get().strip()
+            or (base.scheme if base else "vless"),
+            name=a.ed_name_var.get().strip(),
+            host=a.ed_host_var.get().strip(),
+            port=a.ed_port_var.get().strip() or "443",
+            credential=a.ed_cred_var.get().strip(),
+            transport=a.ed_transport_var.get().strip() or "tcp",
+            security=sec,
+            sni=a.ed_sni_var.get().strip(),
+            host_header=a.ed_hosthdr_var.get().strip(),
+            path=a.ed_path_var.get().strip() or "/",
+            fingerprint=a.ed_fp_var.get().strip(),
+            alpn=a.ed_alpn_var.get().strip(),
+            service_name=a.ed_service_var.get().strip(),
+            header_type=a.ed_hdrtype_var.get().strip(),
+            flow=a.ed_flow_var.get().strip(),
+            public_key=a.ed_pbk_var.get().strip(),
+            short_id=a.ed_sid_var.get().strip(),
+            spider_x=a.ed_spx_var.get().strip(),
+            allow_insecure=bool(a.ed_insecure_var.get()),
+            encryption=a.ed_scy_var.get().strip()
+            or (base.encryption if base else "none"),
+            alter_id=a.ed_aid_var.get().strip() or "0",
+            extra=extra,
+            raw=base.raw if base else "",
+        )
+
+    def _editor_uri(self, out: Outbound) -> str:
+        h = handler_for(out.scheme)
+        if h is None:
+            raise ValueError(f"unsupported protocol: {out.scheme!r}")
+        return h.to_uri(out)
+
+    def _editor_apply(self) -> None:
+        a = self
+        sel = a._editor_sel
+        if not a._editor_items or sel is None \
+                or not (0 <= sel < len(a._editor_items)):
+            a.ed_status_var.set("pick a config first")
+            return
+        idx, old_line, _old = a._editor_items[sel]
+        try:
+            out = a._editor_collect()
+            new_line = a._editor_uri(out)
+        except Exception as e:
+            a.ed_status_var.set(f"apply failed: {e}")
+            return
+        lines = a._editor_out_lines()
+        if not (0 <= idx < len(lines)):
+            a.ed_status_var.set("output changed — press ⟳ reload list")
+            return
+        lines[idx] = new_line
+        a._set_output(lines)
+        # names list mirrors the edited line (incl. a renamed config)
+        new_name = out.name
+        a._name_lines = [(new_name if l == old_line else n,
+                          new_line if l == old_line else l)
+                         for n, l in a._name_lines]
+        a._set_names(a._name_lines)
+        a._targets = [parse_target(l) for l in lines if parse_target(l)]
+        a._build_tester_list()
+        a._editor_items[sel] = (idx, new_line, out)
+        values = list(a.ed_pick_cb.cget("values"))
+        values[sel] = f"{sel + 1} · {a._editor_label(out)}"
+        a.ed_pick_cb.configure(values=values)
+        a.ed_pick_cb.current(sel)
+        a._editor_json_dump(out)
+        a.ed_status_var.set(f"applied — output line {idx + 1} replaced")
+
+    def _editor_json_dump(self, out: Outbound) -> None:
+        a = self
+        a.ed_json_txt.delete("1.0", "end")
+        a.ed_json_txt.insert("1.0", json.dumps(
+            out.to_dict(), ensure_ascii=False, indent=2))
+
+    def _editor_to_json(self) -> None:
+        a = self
+        try:
+            out = a._editor_collect()
+        except Exception as e:
+            a.ed_status_var.set(f"form error: {e}")
+            return
+        a._editor_json_dump(out)
+        a.ed_status_var.set("form → JSON")
+
+    def _editor_from_json(self) -> None:
+        a = self
+        try:
+            out = Outbound.from_dict(
+                json.loads(a.ed_json_txt.get("1.0", "end-1c")))
+        except Exception as e:
+            a.ed_status_var.set(f"bad JSON: {e}")
+            return
+        a._editor_fill(out)
+        a.ed_status_var.set("JSON → form (press apply to write the link)")
+
+    def _editor_copy(self) -> None:
+        a = self
+        try:
+            uri = a._editor_uri(a._editor_collect())
+        except Exception as e:
+            a.ed_status_var.set(f"copy failed: {e}")
+            return
+        a.clipboard_clear()
+        a.clipboard_append(uri)
+        a.ed_status_var.set("URI copied to clipboard")
 
     # ------------------------------------------------------------------ tester list
     def _build_tester_list(self) -> None:

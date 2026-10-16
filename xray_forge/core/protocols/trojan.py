@@ -32,6 +32,10 @@ class TrojanHandler(ProtocolHandler):
             params.append(("path", out.path))
         if out.service_name:
             params.append(("serviceName", out.service_name))
+        if out.header_type:
+            params.append(("headerType", out.header_type))
+        if out.transport == "xhttp" and out.extra.get("mode"):
+            params.append(("mode", out.extra["mode"]))
         if out.security == "reality":
             if out.public_key:
                 params.append(("pbk", out.public_key))

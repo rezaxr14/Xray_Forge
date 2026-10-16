@@ -410,13 +410,13 @@ def parse_target(line: str) -> Outbound | None:
         fingerprint=pd.get("fp", "chrome"),
         alpn=pd.get("alpn", ""),
         service_name=pd.get("servicename", "") or pd.get("service_name", ""),
-        header_type=pd.get("headerType", ""),
+        header_type=pd.get("headertype", ""),
         flow=pd.get("flow", ""),
         public_key=pd.get("pbk", ""),
         short_id=pd.get("sid", ""),
         spider_x=pd.get("spx", ""),
-        allow_insecure=pd.get("allowInsecure", "0") in ("1", "true"),
-        extra={"cs": pd.get("cs", "")},
+        allow_insecure=pd.get("allowinsecure", "0") in ("1", "true"),
+        extra={"cs": pd.get("cs", ""), "mode": pd.get("mode", "")},
         raw=line,
     )
 

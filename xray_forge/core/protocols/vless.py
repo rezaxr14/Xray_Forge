@@ -33,10 +33,16 @@ class VlessHandler(ProtocolHandler):
             params.append(("path", out.path))
         if out.service_name:
             params.append(("serviceName", out.service_name))
+        if out.header_type:
+            params.append(("headerType", out.header_type))
+        if out.transport == "xhttp" and out.extra.get("mode"):
+            params.append(("mode", out.extra["mode"]))
         if out.alpn:
             params.append(("alpn", out.alpn))
         if out.flow:
             params.append(("flow", out.flow))
+        if out.allow_insecure:
+            params.append(("allowInsecure", "1"))
         if out.security == "reality":
             if out.public_key:
                 params.append(("pbk", out.public_key))

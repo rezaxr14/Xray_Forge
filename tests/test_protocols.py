@@ -37,6 +37,40 @@ def test_vless_reality_roundtrip():
     assert out2.host == out.host and out2.port == out.port
 
 
+def test_vless_xhttp_mode_roundtrip():
+    """xhttp ``mode=`` survives parse -> to_uri -> parse (editor round-trip)."""
+    uri = ("vless://uid@1.2.3.4:443?security=tls&sni=x.example&type=xhttp"
+           "&path=%2Fxh&mode=stream-one#xh")
+    out = parse_target(uri)
+    assert out.transport == "xhttp"
+    assert out.extra["mode"] == "stream-one"
+    out2 = handler_for("vless").parse(handler_for("vless").to_uri(out))
+    assert out2.transport == "xhttp"
+    assert out2.extra["mode"] == "stream-one"
+
+
+def test_vless_header_type_and_insecure_roundtrip():
+    uri = ("vless://uid@1.2.3.4:80?type=tcp&headerType=http&security=none"
+           "&allowInsecure=1#obfs")
+    out = parse_target(uri)
+    assert out.header_type == "http"
+    assert out.allow_insecure is True
+    out2 = handler_for("vless").parse(handler_for("vless").to_uri(out))
+    assert out2.header_type == "http"
+    assert out2.allow_insecure is True
+
+
+def test_trojan_xhttp_mode_roundtrip():
+    uri = ("trojan://pw@1.2.3.4:443?security=tls&sni=t.example&type=xhttp"
+           "&path=%2Ft&mode=packet-up#tx")
+    out = parse_target(uri)
+    assert out.transport == "xhttp"
+    assert out.extra["mode"] == "packet-up"
+    out2 = handler_for("trojan").parse(handler_for("trojan").to_uri(out))
+    assert out2.transport == "xhttp"
+    assert out2.extra["mode"] == "packet-up"
+
+
 def test_vless_tls_ws_roundtrip():
     out = parse_target(VLESS_TLS_WS)
     h = handler_for("vless")

@@ -125,11 +125,46 @@ def build(app):
               style="Preview.TLabel").grid(row=2, column=10, sticky="e",
                                            pady=(6, 2))
     ctl.columnconfigure(2, weight=1)
+
+    # --- scan sessions: named, resumable, exportable --------------------
+    ttk.Label(ctl, text="session", style="Dim.TLabel")\
+        .grid(row=3, column=0, padx=(0, 4), pady=(6, 2))
+    sess_e = ttk.Entry(ctl, textvariable=a.scan_session_var, width=16,
+                       font=(MONO, 10))
+    sess_e.grid(row=3, column=1, padx=(0, 6), pady=(6, 2), sticky="w")
+    Tooltip(sess_e,
+            "Named scan session — state saved to ~/.xray_forge/scans/.\n"
+            "Same name + resume = continue an interrupted scan\n"
+            "(also works from the CLI: xray_forge scan --resume NAME).")
+    ttk.Checkbutton(ctl, text="resume", variable=a.scan_resume_var)\
+        .grid(row=3, column=2, sticky="w", pady=(6, 2))
+    ttk.Label(ctl, text="load", style="Dim.TLabel")\
+        .grid(row=3, column=3, padx=(10, 4), pady=(6, 2))
+    a.sessions_cb = ttk.Combobox(ctl, textvariable=a.scan_load_var,
+                                 width=16, font=(MONO, 10))
+    a.sessions_cb.grid(row=3, column=4, pady=(6, 2), sticky="w")
+    ttk.Button(ctl, text="⟳", width=2, style="Ghost.TButton",
+               command=a._scan_sessions_refresh).grid(row=3, column=5,
+                                                      pady=(6, 2))
+    ttk.Button(ctl, text="📂 open", style="Ghost.TButton",
+               command=a._scan_load_session).grid(row=3, column=6,
+                                                  pady=(6, 2))
+    geo_cb = ttk.Checkbutton(ctl, text="geo tag", variable=a.scan_geo_var)
+    geo_cb.grid(row=3, column=7, sticky="w", pady=(6, 2))
+    Tooltip(geo_cb, "Tag every alive IP with exit country + ISP\n"
+                    "(DoH lookup per IP — slower).")
+    ttk.Button(ctl, text="⭳ csv", style="Ghost.TButton",
+               command=a._scan_export_csv).grid(row=3, column=8,
+                                                padx=(10, 0), pady=(6, 2))
+    ttk.Button(ctl, text="⭳ json", style="Ghost.TButton",
+               command=a._scan_export_json).grid(row=3, column=9,
+                                                 pady=(6, 2))
+
     tk.Label(ctl, background=BG, foreground=MUT, font=(SANS, 9),
              text="resolve compares DoH (1.1.1.1 / 8.8.8.8 / shecan / 403)"
                   " + Iranian UDP resolvers + system DNS — if they "
                   "disagree, your DNS is poisoned")\
-        .grid(row=3, column=0, columnspan=11, sticky="w", pady=(2, 2))
+        .grid(row=4, column=0, columnspan=11, sticky="w", pady=(2, 2))
 
     rbar = tk.Frame(body, background=BG)
     rbar.pack(fill="x", padx=8, pady=(2, 4))
@@ -147,8 +182,9 @@ def build(app):
     tk.Label(rbar, text="double-click row → copy IP",
              background=BG, foreground=MUT).pack(side="right")
 
-    cols = {"ip": (150, "w"), "port": (60, "e"), "ms": (70, "e"),
-            "tls": (90, "w"), "info": (250, "w")}
-    a.res_tree = a._make_tree(body, cols, {"ms", "port"})
+    cols = {"ip": (140, "w"), "port": (55, "e"), "ms": (60, "e"),
+            "jitter": (55, "e"), "tls": (85, "w"), "cc": (36, "w"),
+            "info": (230, "w")}
+    a.res_tree = a._make_tree(body, cols, {"ms", "port", "jitter"})
     a.res_tree.pack(fill="both", expand=True, padx=(8, 8), pady=(0, 8))
     a.res_tree.bind("<Double-Button-1>", a._copy_res_ip)

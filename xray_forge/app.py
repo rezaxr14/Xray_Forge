@@ -138,6 +138,7 @@ class App(tk.Tk):
         self._scan_iid = 0
         self._scan_meta: dict[str, tuple[str, str, str | None, str]] = {}
         self._scan_frag: tuple | None = None
+        self._scan_session = None
         self._test_ex: ThreadPoolExecutor | None = None
         self._scan_ex: ThreadPoolExecutor | None = None
         self._cc_cache: dict[str, str] = {}
@@ -214,6 +215,11 @@ class App(tk.Tk):
         a.geo_txt = tk.StringVar(value="")
         a.res_host_var = tk.StringVar(value="")
         a.scan_prog_var = tk.StringVar(value="0/0")
+        # scan sessions (resumable, exported to csv/json)
+        a.scan_session_var = tk.StringVar(value="")
+        a.scan_load_var = tk.StringVar(value="")
+        a.scan_resume_var = tk.BooleanVar(value=False)
+        a.scan_geo_var = tk.BooleanVar(value=False)
         # subscription / dedup / filter / best
         a.sub_url_var = tk.StringVar(value="")
         a.filter_var = tk.StringVar(value="")
@@ -297,6 +303,9 @@ class App(tk.Tk):
         a.subs_tab = subs_tab
         build_subs(a)
 
+        a._subs_refresh_list()
+        a._scan_sessions_refresh()
+
         # bottom status bar
         status = tk.Frame(a, background=PANEL, height=26)
         status.pack(fill="x", side="bottom")
@@ -376,6 +385,7 @@ class App(tk.Tk):
             "scan_cidr_var": str, "scan_port_var": str,
             "scan_sni_var": str, "scan_frag_var": str, "sni_mode_var": str,
             "geo_ip_var": str, "res_host_var": str,
+            "scan_session_var": str, "scan_load_var": str,
             "core_var": str, "core_timeout_var": str,
             "fake_sni_var": str, "domain_front_var": str,
             "sub_core_var": str,
@@ -385,6 +395,7 @@ class App(tk.Tk):
             "auto_var", "ip_on", "port_on", "cc_on", "core_frag_on",
             "curl_var", "dedup_var", "show_best_var",
             "record_frag_var", "sni_case_var", "sub_thr_var",
+            "scan_resume_var", "scan_geo_var",
         ]
         int_vars = ["start_var", "att_var", "workers_test_var",
                     "scan_count_var", "scan_workers_var",
@@ -423,7 +434,8 @@ class App(tk.Tk):
             "frag_var", "tmo_var", "target_var",
             "scan_cidr_var", "scan_port_var", "scan_sni_var",
             "scan_frag_var", "sni_mode_var", "geo_ip_var",
-            "res_host_var", "core_var", "core_timeout_var",
+            "res_host_var", "scan_session_var", "scan_load_var",
+            "core_var", "core_timeout_var",
             "fake_sni_var", "domain_front_var", "sub_core_var",
         ]
         bool_vars = [
@@ -431,6 +443,7 @@ class App(tk.Tk):
             "auto_var", "ip_on", "port_on", "cc_on", "core_frag_on",
             "curl_var", "dedup_var", "show_best_var",
             "record_frag_var", "sni_case_var", "sub_thr_var",
+            "scan_resume_var", "scan_geo_var",
         ]
         int_vars = ["start_var", "att_var", "workers_test_var",
                     "scan_count_var", "scan_workers_var",
@@ -1293,102 +1306,82 @@ class App(tk.Tk):
         except Exception:
             workers = 64
         port = a.scan_port_var.get().strip() or "443"
-        ips = sample_cidr(cidr, count)
-        if not ips:
-            a.msg_var.set("invalid CIDR")
+        from xray_forge.core.scan_session import ScanSession
+        name = a.scan_session_var.get().strip()
+        if not name:
+            name = "scan_" + time.strftime("%Y%m%d_%H%M%S")
+            a.scan_session_var.set(name)
+        session = ScanSession(name)
+        pending = session.set_targets([cidr], count,
+                                      resume=a.scan_resume_var.get())
+        if not pending:
+            a.msg_var.set("session has no pending IPs — uncheck resume "
+                          "or pick a new session name")
             return
+        a._scan_session = session
         a._scanning = True
         a._stop_scan.clear()
         a._scan_done = 0
-        a._scan_total = len(ips)
+        a._scan_total = pending
         a._scan_alive = 0
         a.res_tree.delete(*a.res_tree.get_children(""))
-        a.scan_prog_var.set(f"0/{a._scan_total}")
+        a._scan_meta.clear()
+        a.scan_prog_var.set(f"0/{pending}")
         a.btn_scan.configure(state="disabled")
         a.btn_stop_scan.configure(state="normal")
-        a._scan_ex = ThreadPoolExecutor(max_workers=workers)
         sni = a.scan_sni_var.get().strip() if a.sni_mode_var.get() == "custom" else ""
-        frag = parse_frag_if_avail(a.scan_frag_var.get())
-        futs = {}
-        for ip in ips:
-            futs[a._scan_ex.submit(a._scan_one, ip, port, sni, frag)] = None
-        # track order via dict of future->ip
-        fut_map = {}
-        for ip in ips:
-            fut_map[a._scan_ex.submit(a._scan_one, ip, port, sni, frag)] = ip
-        threading.Thread(target=a._poll_scan, args=(fut_map,),
-                         daemon=True).start()
+        a.msg_var.set(f"scan '{name}' — {pending} ip(s) from {cidr}")
+        threading.Thread(
+            target=a._scan_job,
+            args=(session, port, workers, a.scan_frag_var.get(), sni),
+            daemon=True).start()
 
-    def _scan_one(self, ip: str, port: str, sni: str, frag) -> dict:
+    def _scan_job(self, session, port: str, workers: int, frag: str,
+                  sni: str) -> None:
         a = self
-        res = {"ip": ip, "port": port, "ms": None, "tls": "", "info": "",
-               "alive": False}
-        tmo = float(a.tmo_var.get() or "8")
         try:
-            use_sni = sni
-            if a.sni_mode_var.get() == "config sni":
-                use_sni = None  # raw ip
-            elif a.sni_mode_var.get() == "no sni":
-                use_sni = None
-            if a.curl_var.get() and HAS_CURL_CFFI:
-                info = curl_cffi_probe(ip, port, use_sni, timeout=tmo)
-                res["ms"] = info["tls_ms"]
-                res["tls"] = info["ver"]
-                res["alive"] = True
-                res["info"] = f"curl_cffi {info['ver']}"
-            else:
-                tc, sock, info = tls_connect(
-                    ip, port, sni=use_sni, frag=frag, timeout=tmo,
-                    stop=a._stop_test, fake_sni=a.fake_sni_var.get() or None,
-                    record_frag=a.record_frag_var.get())
-                res["ms"] = info["tls_ms"]
-                res["tls"] = info["ver"]
-                res["alive"] = True
-                res["info"] = f"{info['ver']} tls ok"
-                try:
-                    sock.close()
-                except Exception:
-                    pass
-        except ProbeError as pe:
-            res["info"] = f"{pe.stage}: {pe.detail[:30]}"
+            session.run(port=port, workers=workers, frag=frag, sni=sni or None,
+                        use_curl=a.curl_var.get() and HAS_CURL_CFFI,
+                        geo=a.scan_geo_var.get(),
+                        timeout=float(a.tmo_var.get() or "5"),
+                        stop=a._stop_scan,
+                        progress=lambda d, t: a.after(0, a._scan_progress, d, t))
         except Exception as e:
-            res["info"] = f"err: {type(e).__name__}"
-        return res
-
-    def _poll_scan(self, fut_map: dict) -> None:
-        a = self
-        done = 0
-        for fut in as_completed(fut_map):
-            if a._stop_scan.is_set():
-                break
-            ip = fut_map[fut]
-            try:
-                res = fut.result()
-            except Exception as e:
-                res = {"ip": ip, "port": a.scan_port_var.get(), "ms": None,
-                       "tls": "", "info": str(e), "alive": False}
-            done += 1
-            a._scan_done = done
-            a.after(0, lambda: a.scan_prog_var.set(f"{done}/{a._scan_total}"))
-            if res.get("alive"):
-                a._scan_alive += 1
-                a.after(0, a._add_scan_row, res)
+            a.after(0, lambda: a.msg_var.set(f"scan error: {e}"))
         a.after(0, a._finish_scan)
 
-    def _add_scan_row(self, res: dict) -> None:
+    def _scan_progress(self, done: int, total: int) -> None:
+        a = self
+        a._scan_done = done
+        a.scan_prog_var.set(f"{done}/{total}")
+        a.msg_var.set(f"scanning … {done}/{total}")
+
+    def _add_scan_row(self, r) -> None:
+        """Insert a ScanResult row into the results tree."""
         a = self
         iid = a.res_tree.insert("", "end", values=(
-            res["ip"], res["port"],
-            f"{res['ms']:.0f}" if res.get("ms") is not None else "—",
-            res.get("tls", ""), res.get("info", "")))
-        a._scan_meta[iid] = (res["ip"], res["port"], res.get("ms"), "")
+            r.ip, r.port,
+            f"{r.ms:.0f}" if r.ms is not None else "—",
+            f"{r.jitter:.0f}" if getattr(r, "jitter", None) is not None else "—",
+            getattr(r, "tls", "") or "",
+            getattr(r, "cc", "") or "",
+            getattr(r, "info", "") or ""))
+        a._scan_meta[iid] = (r.ip, r.port, r.ms, getattr(r, "info", "") or "")
 
     def _finish_scan(self) -> None:
         a = self
         a._scanning = False
         a.btn_scan.configure(state="normal")
         a.btn_stop_scan.configure(state="disabled")
-        a.msg_var.set(f"scan complete — {a._scan_alive}/{a._scan_total} alive")
+        s = a._scan_session
+        if s is not None:
+            a.res_tree.delete(*a.res_tree.get_children(""))
+            alive = s.alive()
+            for r in alive:
+                a._add_scan_row(r)
+            a.msg_var.set(f"scan '{s.name}' — {len(alive)}/{len(s.results)} "
+                          f"alive · {len(s.pending)} pending · session saved "
+                          f"(resume or export below)")
         if a._scan_ex:
             try:
                 a._scan_ex.shutdown(wait=False)
@@ -1472,6 +1465,66 @@ class App(tk.Tk):
         a = self
         a.res_tree.delete(*a.res_tree.get_children(""))
         a.msg_var.set("scan cleared")
+
+    def _scans_dir(self) -> str:
+        import os
+        from xray_forge.core.settings import data_dir
+        return os.path.join(data_dir(), "scans")
+
+    def _scan_sessions_refresh(self) -> None:
+        a = self
+        import os
+        d = a._scans_dir()
+        names = []
+        if os.path.isdir(d):
+            names = sorted(f[:-5] for f in os.listdir(d) if f.endswith(".json"))
+        a.sessions_cb.configure(values=names)
+        if names and not a.scan_load_var.get():
+            a.scan_load_var.set(names[-1])
+        a.msg_var.set(f"{len(names)} saved scan session(s)")
+
+    def _scan_load_session(self) -> None:
+        a = self
+        name = a.scan_load_var.get().strip()
+        if not name:
+            a.msg_var.set("pick a session to load (or ⟳ refresh)")
+            return
+        from xray_forge.core.scan_session import ScanSession
+        s = ScanSession(name)
+        a._scan_session = s
+        a.scan_session_var.set(name)
+        a.res_tree.delete(*a.res_tree.get_children(""))
+        a._scan_meta.clear()
+        alive = s.alive()
+        for r in alive:
+            a._add_scan_row(r)
+        a.msg_var.set(f"loaded session '{name}' — {len(alive)} alive, "
+                      f"{len(s.pending)} pending")
+
+    def _scan_export(self, kind: str) -> None:
+        a = self
+        if a._scan_session is None:
+            a.msg_var.set("no scan session — run or load one first")
+            return
+        path = filedialog.asksaveasfilename(
+            parent=a, defaultextension=f".{kind}",
+            initialfile=f"{a._scan_session.name}.{kind}",
+            filetypes=[(f"{kind.upper()} files", f"*.{kind}"),
+                       ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            (a._scan_session.export_csv if kind == "csv"
+             else a._scan_session.export_json)(path)
+            a.msg_var.set(f"{kind} exported → {path}")
+        except Exception as e:
+            messagebox.showerror("export failed", str(e), parent=a)
+
+    def _scan_export_csv(self) -> None:
+        self._scan_export("csv")
+
+    def _scan_export_json(self) -> None:
+        self._scan_export("json")
 
     # ------------------------------------------------------------------ close
     def _on_close(self) -> None:

@@ -66,6 +66,7 @@ from xray_forge.ui.tabs.converter_tab import build as build_converter_pane
 from xray_forge.ui.tabs.tester_tab import build as build_tester
 from xray_forge.ui.tabs.xray_tab import build as build_xray_tab
 from xray_forge.ui.tabs.scanner_tab import build as build_scanner
+from xray_forge.ui.tabs.subs_tab import build as build_subs
 
 from tkinter import simpledialog  # noqa: F401  (tk.simpledialog usage below)
 
@@ -100,6 +101,18 @@ class _Done(Exception):
     pass
 
 
+def _fmt_bps(stage) -> str:
+    """Format a throughput StageResult as KB/s or MB/s ('—' when absent)."""
+    if stage is None or not stage.ok:
+        return "—"
+    bps = (stage.data or {}).get("bps")
+    if not bps:
+        return "—"
+    if bps >= 1_048_576:
+        return f"{bps / 1_048_576:.1f}MB/s"
+    return f"{bps / 1024:.0f}KB/s"
+
+
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
@@ -129,6 +142,9 @@ class App(tk.Tk):
         self._scan_ex: ThreadPoolExecutor | None = None
         self._cc_cache: dict[str, str] = {}
         self._cc_lock = threading.Lock()
+        self._sub_reports: list = []
+        self._sub_stop = threading.Event()
+        self._subs_checking = False
         self.HAS_CURL_CFFI = HAS_CURL_CFFI
         # settings
         self._settings = load_settings()
@@ -203,6 +219,14 @@ class App(tk.Tk):
         a.filter_var = tk.StringVar(value="")
         a.dedup_var = tk.BooleanVar(value=False)
         a.show_best_var = tk.BooleanVar(value=False)
+        # subscriptions tab (source manager + staged health checks)
+        a.sub_workers_var = tk.StringVar(value="8")
+        a.sub_timeout_var = tk.StringVar(value="6")
+        a.sub_top_var = tk.StringVar(value="10")
+        a.sub_core_var = tk.StringVar(value="auto")
+        a.sub_thr_var = tk.BooleanVar(value=True)
+        a.sub_status_var = tk.StringVar(value="idle")
+        a.sub_prog_var = tk.StringVar(value="0/0")
         # counts / status
         a.msg_var = tk.StringVar(
             value="Paste configs on the left — conversion is live. "
@@ -267,6 +291,11 @@ class App(tk.Tk):
         nb.add(find_tab, text="  🌐 IP Finder  ")
         a.find_tab = find_tab
         build_scanner(a)
+
+        subs_tab = tk.Frame(container, background=BG)
+        nb.add(subs_tab, text="  📥 Subscriptions  ")
+        a.subs_tab = subs_tab
+        build_subs(a)
 
         # bottom status bar
         status = tk.Frame(a, background=PANEL, height=26)
@@ -349,16 +378,18 @@ class App(tk.Tk):
             "geo_ip_var": str, "res_host_var": str,
             "core_var": str, "core_timeout_var": str,
             "fake_sni_var": str, "domain_front_var": str,
+            "sub_core_var": str,
         }
         bool_vars = [
             "fp_on", "cs_on", "fm_on", "rename_var", "tls_only_var",
             "auto_var", "ip_on", "port_on", "cc_on", "core_frag_on",
             "curl_var", "dedup_var", "show_best_var",
-            "record_frag_var", "sni_case_var",
+            "record_frag_var", "sni_case_var", "sub_thr_var",
         ]
         int_vars = ["start_var", "att_var", "workers_test_var",
                     "scan_count_var", "scan_workers_var",
-                    "core_workers_var"]
+                    "core_workers_var", "sub_workers_var", "sub_timeout_var",
+                    "sub_top_var"]
         for key, cast in var_map.items():
             if key in s and hasattr(a, key):
                 try:
@@ -393,17 +424,18 @@ class App(tk.Tk):
             "scan_cidr_var", "scan_port_var", "scan_sni_var",
             "scan_frag_var", "sni_mode_var", "geo_ip_var",
             "res_host_var", "core_var", "core_timeout_var",
-            "fake_sni_var", "domain_front_var",
+            "fake_sni_var", "domain_front_var", "sub_core_var",
         ]
         bool_vars = [
             "fp_on", "cs_on", "fm_on", "rename_var", "tls_only_var",
             "auto_var", "ip_on", "port_on", "cc_on", "core_frag_on",
             "curl_var", "dedup_var", "show_best_var",
-            "record_frag_var", "sni_case_var",
+            "record_frag_var", "sni_case_var", "sub_thr_var",
         ]
         int_vars = ["start_var", "att_var", "workers_test_var",
                     "scan_count_var", "scan_workers_var",
-                    "core_workers_var"]
+                    "core_workers_var", "sub_workers_var", "sub_timeout_var",
+                    "sub_top_var"]
         for key in simple_vars:
             if hasattr(a, key):
                 try:
@@ -743,6 +775,218 @@ class App(tk.Tk):
         a.input_txt.insert("1.0", "\n".join(out))
         a.msg_var.set(f"🔀 deduplicated — removed {removed} duplicate(s)")
         a._schedule()
+
+    # ------------------------------------------------------------------ subscriptions tab
+    def _subs_mgr(self):
+        from xray_forge.core.sub_source import SourceManager
+        return SourceManager()
+
+    def _subs_refresh_list(self) -> None:
+        a = self
+        if not hasattr(a, "subs_tree"):
+            return
+        a.subs_tree.delete(*a.subs_tree.get_children(""))
+        try:
+            for src in a._subs_mgr().list_sources():
+                a.subs_tree.insert("", "end", values=(
+                    "✓" if src.enabled else "—", src.name, src.url,
+                    src.etag[:12] or "—", src.last_fetch or "—",
+                    src.last_status or "—", src.last_count))
+        except Exception as e:
+            a.msg_var.set(f"sources error: {e}")
+
+    def _subs_add(self) -> None:
+        a = self
+        url = tk.simpledialog.askstring("add source", "subscription URL:",
+                                        parent=a)
+        if not url or not url.strip():
+            return
+        name = tk.simpledialog.askstring("add source", "label (optional):",
+                                         parent=a) or ""
+        a._subs_mgr().add(url.strip(), name.strip())
+        a._subs_refresh_list()
+        a.msg_var.set(f"source added: {url.strip()[:60]}")
+
+    def _subs_selected_url(self) -> str:
+        a = self
+        sel = a.subs_tree.selection()
+        if not sel:
+            a.msg_var.set("select a source row first")
+            return ""
+        return str(a.subs_tree.set(sel[0], "url"))
+
+    def _subs_remove(self) -> None:
+        a = self
+        url = a._subs_selected_url()
+        if not url:
+            return
+        removed = a._subs_mgr().remove(url)
+        a._subs_refresh_list()
+        a.msg_var.set("source removed" if removed else "source not found")
+
+    def _subs_toggle(self) -> None:
+        a = self
+        url = a._subs_selected_url()
+        if not url:
+            return
+        sel = a.subs_tree.selection()[0]
+        enabled = str(a.subs_tree.set(sel, "on")) == "✓"
+        a._subs_mgr().set_enabled(url, not enabled)
+        a._subs_refresh_list()
+
+    def _subs_copy_url(self, _event=None) -> None:
+        a = self
+        iid = a.subs_tree.focus()
+        if not iid:
+            return
+        a.clipboard_clear()
+        a.clipboard_append(str(a.subs_tree.set(iid, "url")))
+        a.msg_var.set("source URL copied")
+
+    def _subs_fetch(self) -> None:
+        a = self
+        a.sub_status_var.set("fetching …")
+        threading.Thread(target=a._subs_fetch_job, daemon=True).start()
+
+    def _subs_fetch_job(self) -> None:
+        a = self
+        try:
+            out = a._subs_mgr().fetch_all()
+            lines, removed = a._subs_mgr().combined_lines()
+        except Exception as e:
+            a.after(0, lambda: a.sub_status_var.set(f"fetch error: {e}"))
+            return
+        n_src = len(out)
+        a.after(0, a._subs_refresh_list)
+        a.after(0, lambda: a.sub_status_var.set(
+            f"{n_src} source(s) · {len(lines)} configs ({removed} dup removed)"))
+        a.after(0, lambda: a.msg_var.set(
+            f"subscriptions fetched — {len(lines)} unique configs ready to check"))
+
+    def _subs_check(self) -> None:
+        a = self
+        if getattr(a, "_subs_checking", False):
+            return
+        lines, _removed = a._subs_mgr().combined_lines()
+        if not lines:
+            a.sub_status_var.set("no cached configs — fetch first")
+            return
+        a._subs_checking = True
+        a._sub_reports = []
+        a._sub_stop.clear()
+        a.subres_tree.delete(*a.subres_tree.get_children(""))
+        a.sub_prog_var.set(f"0/{len(lines)}")
+        a.btn_subs_check.configure(state="disabled")
+        a.btn_subs_stop.configure(state="normal")
+        core = a.sub_core_var.get()
+        if core == "native only":
+            core = ""
+        kwargs = dict(
+            workers=max(1, int(a.sub_workers_var.get() or "8")),
+            timeout=float(a.sub_timeout_var.get() or "6"),
+            do_throughput=a.sub_thr_var.get(),
+            core=core or None,
+            stop=a._sub_stop,
+            progress=lambda d, t: a.after(0, a._subs_progress, d, t),
+        )
+        threading.Thread(target=a._subs_check_job, args=(list(lines), kwargs),
+                         daemon=True).start()
+
+    def _subs_progress(self, done: int, total: int) -> None:
+        self.sub_prog_var.set(f"{done}/{total}")
+        self.sub_status_var.set(f"checking {done}/{total} …")
+
+    def _subs_check_job(self, lines: list, kwargs: dict) -> None:
+        a = self
+        from xray_forge.core import healthcheck as hc
+        try:
+            reports = hc.run_health_checks(lines, **kwargs)
+        except Exception as e:
+            a.after(0, lambda: a.sub_status_var.set(f"check error: {e}"))
+            a.after(0, a._subs_finish)
+            return
+        a._sub_reports = reports
+        a.after(0, a._subs_fill_results)
+        a.after(0, a._subs_finish)
+
+    def _subs_fill_results(self) -> None:
+        a = self
+        from xray_forge.core import healthcheck as hc
+        a.subres_tree.delete(*a.subres_tree.get_children(""))
+        for r in hc.rank_reports(a._sub_reports):
+            req = r.stage("request")
+            dl = r.stage("download")
+            ul = r.stage("upload")
+            failing = next((s.name for s in r.stages if not s.ok), None)
+            status = ("ok" if r.passed()
+                      else f"{failing}: {r.stage(failing).detail[:34]}"
+                      if failing else "—")
+            a.subres_tree.insert("", "end", values=(
+                r.name or r.line[:28], r.scheme, f"{r.score:.0f}",
+                f"{req.ms:.0f}" if (req and req.ms is not None) else "—",
+                _fmt_bps(dl), _fmt_bps(ul),
+                ",".join(r.techniques) or "—", status))
+
+    def _subs_finish(self) -> None:
+        a = self
+        a._subs_checking = False
+        a.btn_subs_check.configure(state="normal")
+        a.btn_subs_stop.configure(state="disabled")
+        n_ok = sum(1 for r in a._sub_reports if r.passed())
+        a.sub_status_var.set(
+            f"done — {n_ok}/{len(a._sub_reports)} working")
+        a.msg_var.set(f"health check complete — {n_ok} working config(s)")
+
+    def _subs_export(self) -> None:
+        a = self
+        from xray_forge.core import healthcheck as hc
+        if not a._sub_reports:
+            a.msg_var.set("run a health check first")
+            return
+        try:
+            top = int(a.sub_top_var.get() or "10")
+        except Exception:
+            top = 10
+        path = filedialog.asksaveasfilename(
+            parent=a, defaultextension=".txt", initialfile="best_sub.txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(hc.export_best_subscription(a._sub_reports, top))
+            a.msg_var.set(f"best-{top} subscription saved → {path}")
+        except Exception as e:
+            messagebox.showerror("export failed", str(e), parent=a)
+
+    def _subs_use(self) -> None:
+        a = self
+        from xray_forge.core import healthcheck as hc
+        if not a._sub_reports:
+            a.msg_var.set("run a health check first")
+            return
+        tags = hc.tagged_lines(a._sub_reports)
+        if not tags:
+            a.msg_var.set("no working configs to send")
+            return
+        a.input_txt.delete("1.0", "end")
+        a.input_txt.insert("1.0", "\n".join(tags))
+        a.nb.select(0)
+        a._schedule()
+        a.msg_var.set(f"{len(tags)} working config(s) sent to Configs tab")
+
+    def _subs_copy_config(self, _event=None) -> None:
+        a = self
+        iid = a.subres_tree.focus()
+        if not iid:
+            return
+        name = str(a.subres_tree.set(iid, "name"))
+        for r in a._sub_reports:
+            if (r.name or r.line[:28]) == name:
+                a.clipboard_clear()
+                a.clipboard_append(r.line)
+                a.msg_var.set("config copied")
+                return
 
     # ------------------------------------------------------------------ test worker
     def _start_test(self, selected: bool = False) -> None:
@@ -1234,6 +1478,7 @@ class App(tk.Tk):
         a = self
         a._stop_test.set()
         a._stop_scan.set()
+        a._sub_stop.set()
         try:
             save_settings(a._capture_settings())
         except Exception:

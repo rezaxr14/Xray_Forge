@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import contextlib
+import json
 
 import pytest
 
@@ -142,3 +144,107 @@ def test_stage_result_throughput_bps(wired):
                               socks_port=None)
     assert not res.ok  # no transport available
     assert "no transport" in res.detail
+
+
+# ===========================================================================
+# Core-backed stages (request/throughput via a real core's SOCKS inbound)
+# ===========================================================================
+
+GEO_BODY = json.dumps({"status": "success", "countryCode": "de",
+                       "query": "5.6.7.8"}).encode()
+
+
+@contextlib.contextmanager
+def fake_core_ctx(out, core, binary=None):
+    yield 19876
+
+
+def test_probe_request_socks_ok(wired, monkeypatch):
+    monkeypatch.setattr(hc, "fetch_via_socks",
+                        lambda *a, **k: (88.0, "HTTP/1.1 200 OK", GEO_BODY))
+    res = hc.probe_request_socks(19876)
+    assert res.ok
+    assert res.data["cc"] == "DE"
+    assert res.data["exit_ip"] == "5.6.7.8"
+
+
+def test_probe_request_socks_bad_status(wired, monkeypatch):
+    monkeypatch.setattr(hc, "fetch_via_socks",
+                        lambda *a, **k: (30.0, "HTTP/1.1 502 Bad Gateway", b""))
+    res = hc.probe_request_socks(19876)
+    assert not res.ok
+
+
+def test_probe_request_socks_error(wired, monkeypatch):
+    def boom(*a, **k):
+        raise hc.ProbeError("socks", "connection refused")
+    monkeypatch.setattr(hc, "fetch_via_socks", boom)
+    res = hc.probe_request_socks(19876)
+    assert not res.ok
+    assert "refused" in res.detail
+
+
+def test_core_context_none_cases(wired, monkeypatch):
+    assert hc._core_context(Outbound(), None) is None
+    assert hc._core_context(Outbound(), "nosuchcore") is None
+    from xray_forge.core.cores import get_core
+    monkeypatch.setattr(get_core("xray"), "find_binary", lambda: "")
+    out = Outbound(scheme="trojan", name="t", host="203.0.113.10", port="443",
+                   credential="pw")
+    assert hc._core_context(out, "xray") is None
+
+
+def test_core_context_auto_picks_installed_core(wired, monkeypatch):
+    """auto: with a (fake) binary found, a supporting core is selected."""
+    from xray_forge.core.cores import iter_cores
+    for c in iter_cores():
+        monkeypatch.setattr(c, "find_binary", lambda: "/fake/bin",
+                            raising=False)
+    out = Outbound(scheme="trojan", name="t", host="203.0.113.10", port="443",
+                   credential="pw")
+    ctx = hc._core_context(out, "auto")
+    assert ctx is not None
+
+
+def test_pipeline_core_backed_request(wired, monkeypatch):
+    """A trojan config (no native tunnel) passes fully via a spawned core."""
+    monkeypatch.setattr(hc, "_core_context",
+                        lambda out, core, binary=None:
+                        fake_core_ctx(out, core, binary))
+    rep = hc.run_health_check(TROJAN_TLS, core="xray")
+    names = [s.name for s in rep.stages]
+    assert names == ["dns", "tcp", "tls", "request", "download", "upload"]
+    assert rep.passed()
+    assert all(s.ok for s in rep.stages)
+
+
+def test_pipeline_core_backed_country_in_request(wired, monkeypatch):
+    monkeypatch.setattr(hc, "fetch_via_socks",
+                        lambda *a, **k: (90.0, "HTTP/1.1 200 OK", GEO_BODY))
+    monkeypatch.setattr(hc, "_core_context",
+                        lambda out, core, binary=None:
+                        fake_core_ctx(out, core, binary))
+    rep = hc.run_health_check(TROJAN_TLS, core="xray")
+    assert rep.stage("request").data.get("cc") == "DE"
+
+
+def test_pipeline_core_unavailable_keeps_native_failure(wired, monkeypatch):
+    """No usable core -> request stage still fails (native unsupported)."""
+    monkeypatch.setattr(hc, "_core_context", lambda out, core, binary=None: None)
+    rep = hc.run_health_check(TROJAN_TLS, core="xray")
+    assert not rep.stage("request").ok
+    assert not rep.passed()
+
+
+def test_run_health_checks_progress_and_stop(wired):
+    seen = []
+    reports = hc.run_health_checks([VLESS_TLS_WS, TROJAN_TLS], workers=2,
+                                   progress=lambda d, t: seen.append((d, t)))
+    assert len(reports) == 2
+    assert seen[-1] == (2, 2)
+    stop_seen = []
+    hc.run_health_checks([VLESS_TLS_WS, TROJAN_TLS], workers=1,
+                         progress=lambda d, t: stop_seen.append(d),
+                         stop=__import__("threading").Event())
+    # stop never set -> everything still reported
+    assert stop_seen == [1, 2]

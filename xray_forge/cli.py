@@ -217,7 +217,8 @@ def cli_warp_config(acct=None, endpoint: str | None = None) -> str:
 
 
 def cli_subs(action: str, url: str, name: str, top_n: int, outfile: str,
-             workers: int, timeout: float, no_throughput: bool) -> None:
+             workers: int, timeout: float, no_throughput: bool,
+             core: str | None = None) -> None:
     """Subscription source manager + staged health checks."""
     from xray_forge.core.sub_source import SourceManager
     from xray_forge.core import healthcheck as hc
@@ -242,9 +243,13 @@ def cli_subs(action: str, url: str, name: str, top_n: int, outfile: str,
         lines, _ = mgr.combined_lines()
         if not lines:
             raise SystemExit("no cached configs — run: subs fetch")
-        print(f"health-checking {len(lines)} configs …")
-        reports = hc.run_health_checks(lines, workers=workers, timeout=timeout,
-                                       do_throughput=not no_throughput)
+        print(f"health-checking {len(lines)} configs "
+              f"(core={core or 'native-only'}) …")
+        reports = hc.run_health_checks(
+            lines, workers=workers, timeout=timeout,
+            do_throughput=not no_throughput, core=core,
+            progress=lambda d, t: print(f"\r{d}/{t}", end="", flush=True))
+        print()
         ranked = hc.rank_reports(reports)
         for r in ranked[:top_n or 20]:
             print("  " + r.summary())
@@ -347,6 +352,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_subs.add_argument("--workers", type=int, default=8)
     p_subs.add_argument("--timeout", type=float, default=6.0)
     p_subs.add_argument("--no-throughput", action="store_true")
+    p_subs.add_argument("--core", default=None,
+                        choices=["auto", "xray", "singbox", "mihomo"],
+                        help="check non-VLESS/WS configs via a real core")
 
     return parser
 
@@ -386,7 +394,7 @@ def main(argv: list[str] | None = None) -> int:
         cli_warp(args.action, args.endpoint, args.count, args.workers)
     elif cmd == "subs":
         cli_subs(args.action, args.url, args.name, args.top_n, args.outfile,
-                 args.workers, args.timeout, args.no_throughput)
+                 args.workers, args.timeout, args.no_throughput, args.core)
     else:
         # default: launch GUI (imported lazily so the CLI stays headless)
         from xray_forge.app import App

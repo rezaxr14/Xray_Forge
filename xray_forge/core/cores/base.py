@@ -13,6 +13,7 @@ sing-box, or Mihomo (Clash.Meta).  Each :class:`CoreAdapter`
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import socket
@@ -148,8 +149,9 @@ def run_socks_probe(core: "CoreAdapter", binary: str, cfg: dict[str, Any],
             with open(cfg_path, "w", encoding="utf-8") as f:
                 json.dump(cfg, f)
         cmd = [binary, *core.run_args, cfg_path]
+        err_fh = open(err_path, "wb")
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
-                                stderr=open(err_path, "wb"), **kw)
+                                stderr=err_fh, **kw)
         ok = False
         end = time.time() + 5
         while time.time() < end:
@@ -201,6 +203,99 @@ def run_socks_probe(core: "CoreAdapter", binary: str, cfg: dict[str, Any],
             try:
                 proc.kill()
                 proc.wait(timeout=3)
+            except Exception:
+                pass
+        try:
+            err_fh.close()
+        except Exception:
+            pass
+        for p in (cfg_path, err_path):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+
+# ===========================================================================
+# Reusable core runner: context manager used by the health-check pipeline
+# ===========================================================================
+
+@contextlib.contextmanager
+def running_core(core: "CoreAdapter", outbounds: list[Outbound], *,
+                 binary: str | None = None, socks_port: int | None = None,
+                 frag_on: bool = True, front_domain: str | None = None,
+                 wait: float = 5.0):
+    """Context manager: run ``outbounds`` through a real core binary.
+
+    Builds the core's client config on a free local SOCKS port, spawns the
+    binary (temp config + log, ``CREATE_NO_WINDOW`` on Windows), waits until
+    the port accepts connections, then yields the port number.  On exit the
+    process is killed and the temp files removed.
+
+    Raises :class:`RuntimeError` when the binary is missing or exits before
+    opening the port — callers decide whether that is fatal.
+    """
+    binary = binary or core.find_binary()
+    if not binary:
+        raise RuntimeError(f"{core.name} core binary not found")
+    port = socks_port or _free_port()
+    cfg = core.build_client_config(outbounds, port, frag_on=frag_on,
+                                   front_domain=front_domain)
+    cfg = _rebind_socks_port(cfg, port)
+    kw: dict[str, Any] = {}
+    if os.name == "nt":
+        kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+    cfg_fd, cfg_path = tempfile.mkstemp(suffix=core.config_suffix)
+    os.close(cfg_fd)
+    err_fd, err_path = tempfile.mkstemp(suffix=".log")
+    os.close(err_fd)
+    proc: subprocess.Popen | None = None
+    err_fh = None
+    try:
+        if core.config_suffix == ".yaml":
+            import yaml
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                yaml.dump(cfg, f, sort_keys=False)
+        else:
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                json.dump(cfg, f)
+        err_fh = open(err_path, "wb")
+        proc = subprocess.Popen([binary, *core.run_args, cfg_path],
+                                stdout=subprocess.DEVNULL, stderr=err_fh, **kw)
+        opened = False
+        end = time.time() + wait
+        while time.time() < end:
+            if proc.poll() is not None:
+                break
+            try:
+                s = socket.create_connection(("127.0.0.1", port), timeout=0.3)
+                s.close()
+                opened = True
+                break
+            except OSError:
+                time.sleep(0.1)
+        if not opened:
+            tail = ""
+            try:
+                with open(err_path, "r", encoding="utf-8", errors="replace") as f:
+                    lines = [l for l in f.read().strip().splitlines() if l]
+                tail = lines[-1][:80] if lines else ""
+            except OSError:
+                pass
+            raise RuntimeError(("{} exited: " + tail).format(core.name) if tail
+                               else f"{core.name} failed to open socks port "
+                                    f"{port} within {wait:.0f}s")
+        yield port
+    finally:
+        if proc and proc.poll() is None:
+            try:
+                proc.kill()
+                proc.wait(timeout=3)
+            except Exception:
+                pass
+        if err_fh:
+            try:
+                err_fh.close()
             except Exception:
                 pass
         for p in (cfg_path, err_path):

@@ -21,6 +21,7 @@ Scoring is 0-100 with stage weights; :func:`rank_reports` sorts by score and
 from __future__ import annotations
 
 import base64
+import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -31,6 +32,7 @@ from xray_forge.core.probe import (
     ProbeError, tcp_ping, tls_connect, parse_frag, ws_upgrade,
     VlessTunnel, tunnel_http_get,
 )
+from xray_forge.core.cores.base import running_core
 from xray_forge.core.socks import fetch_via_socks
 
 # Stage weights (sum 100)
@@ -38,6 +40,9 @@ WEIGHTS = {"dns": 5, "tcp": 10, "tls": 20, "request": 30,
            "download": 20, "upload": 15}
 DEFAULT_FRAG_VARIANTS = ("off", "5,94,1@2", "rand:1-16@2")
 DEFAULT_TARGET = ("speed.cloudflare.com", 80, "/__down?bytes=524288")
+# Request target for core-backed checks (also yields exit IP + country)
+SOCKS_REQUEST_TARGET = ("ip-api.com", 80,
+                        "/json?fields=status,countryCode,country,city,isp,query")
 
 
 @dataclass
@@ -146,6 +151,56 @@ def probe_request(out: Outbound, tc, sock, timeout: float = 8.0, stop=None) -> S
     return StageResult("request", ok, ms=ms, detail=line[:40])
 
 
+def probe_request_socks(socks_port: int, timeout: float = 8.0, stop=None) -> StageResult:
+    """Request stage through a running core's local SOCKS5 inbound.
+
+    This is how every non-VLESS/WS protocol (trojan, vmess, ss, hysteria2,
+    tuic, wireguard) gets checked: a real core binary runs the config and
+    the request goes through it.  The geo response also yields the exit
+    IP/country in ``data``.
+    """
+    try:
+        ms, status, body = fetch_via_socks("127.0.0.1", socks_port,
+                                           *SOCKS_REQUEST_TARGET, timeout=timeout)
+    except Exception as e:
+        return StageResult("request", False, detail=str(e)[:60])
+    ok = status.startswith("HTTP/1.1 200") or " 200 " in status
+    data: dict = {}
+    try:
+        d = json.loads(body.decode("utf-8", "replace"))
+        cc = str(d.get("countryCode") or "")
+        if len(cc) == 2 and cc.isalpha():
+            data["cc"] = cc.upper()
+            data["exit_ip"] = str(d.get("query") or "")
+    except Exception:
+        pass
+    return StageResult("request", ok, ms=ms, detail=status[:40], data=data)
+
+
+def _core_context(out: Outbound, core: str | None,
+                  binary: str | None = None):
+    """Context manager yielding a local SOCKS port for ``out`` via a real
+    core, or ``None`` when no usable core is installed.
+
+    ``core`` is a registered adapter name ("xray" | "singbox" | "mihomo")
+    or ``"auto"`` (first installed core that supports the config).
+    """
+    if not core:
+        return None
+    from xray_forge.core.cores import get_core, iter_cores
+    if core == "auto":
+        candidates = iter_cores()
+    else:
+        adapter = get_core(core)
+        candidates = [adapter] if adapter is not None else []
+    for adapter in candidates:
+        bin_path = binary or adapter.find_binary()
+        if not bin_path or not adapter.supports(out):
+            continue
+        return running_core(adapter, [out], binary=bin_path)
+    return None
+
+
 def probe_throughput(out: Outbound, tc, sock, direction: str = "download",
                      bytes_count: int = 262144, timeout: float = 15.0,
                      stop=None, socks_port: int | None = None) -> StageResult:
@@ -222,8 +277,16 @@ def run_health_check(line: str,
                      timeout: float = 6.0,
                      stop=None,
                      socks_port: int | None = None,
-                     upload_bytes: int = 65536) -> HealthReport:
-    """Run the full staged pipeline for one share-link."""
+                     upload_bytes: int = 65536,
+                     core: str | None = None,
+                     core_binary: str | None = None) -> HealthReport:
+    """Run the full staged pipeline for one share-link.
+
+    ``core`` ("xray" | "singbox" | "mihomo" | "auto") enables core-backed
+    checks: when the native tunnel can't run the protocol, the request and
+    throughput stages go through a locally spawned core's SOCKS inbound
+    instead of failing.
+    """
     out = parse_target(line)
     if out is None:
         rep = HealthReport(line=line)
@@ -243,21 +306,28 @@ def run_health_check(line: str,
             rep.techniques.append(tag)
         rep.stages.append(tls_res)
         if tls_res.ok:
-            req_res = probe_request(out, tc, sock, timeout=timeout, stop=stop)
-            rep.stages.append(req_res)
-            if do_throughput and req_res.ok:
-                rep.stages.append(probe_throughput(out, tc, sock, "download",
-                                                   timeout=timeout, stop=stop,
-                                                   socks_port=socks_port))
-                rep.stages.append(probe_throughput(out, tc, sock, "upload",
-                                                   bytes_count=upload_bytes,
-                                                   timeout=timeout, stop=stop,
-                                                   socks_port=socks_port))
-            elif do_throughput and socks_port is not None:
-                # no native tunnel — try via a running core's socks port
-                rep.stages.append(probe_throughput(out, None, None, "download",
-                                                   timeout=timeout, stop=stop,
-                                                   socks_port=socks_port))
+            core_ctx = _core_context(out, core, core_binary)
+            socks = socks_port
+            try:
+                if core_ctx is not None:
+                    socks = core_ctx.__enter__()
+                req_res = probe_request(out, tc, sock, timeout=timeout, stop=stop)
+                if not req_res.ok and socks is not None:
+                    sres = probe_request_socks(socks, timeout=timeout, stop=stop)
+                    if sres.ok:
+                        req_res = sres
+                rep.stages.append(req_res)
+                if do_throughput and req_res.ok:
+                    rep.stages.append(probe_throughput(out, tc, sock, "download",
+                                                       timeout=timeout, stop=stop,
+                                                       socks_port=socks))
+                    rep.stages.append(probe_throughput(out, tc, sock, "upload",
+                                                       bytes_count=upload_bytes,
+                                                       timeout=timeout, stop=stop,
+                                                       socks_port=socks))
+            finally:
+                if core_ctx is not None:
+                    core_ctx.__exit__(None, None, None)
         try:
             if sock is not None:
                 sock.close()
@@ -267,18 +337,30 @@ def run_health_check(line: str,
     return rep
 
 
-def run_health_checks(lines: list[str], workers: int = 8, **kwargs) -> list[HealthReport]:
-    """Run the pipeline over many configs in parallel."""
+def run_health_checks(lines: list[str], workers: int = 8, progress=None,
+                      stop=None, **kwargs) -> list[HealthReport]:
+    """Run the pipeline over many configs in parallel.
+
+    ``progress(done, total)`` fires as each report completes; ``stop`` is a
+    :class:`threading.Event` that aborts result collection (in-flight probes
+    still finish, bounded by their timeouts).
+    """
     reports: list[HealthReport] = []
     with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
         futs = {ex.submit(run_health_check, line, **kwargs): line for line in lines}
+        done = 0
         for fut in as_completed(futs):
+            if stop is not None and stop.is_set():
+                break
             try:
                 reports.append(fut.result())
             except Exception as e:
                 rep = HealthReport(line=futs[fut])
                 rep.stages.append(StageResult("error", False, detail=str(e)[:60]))
                 reports.append(rep)
+            done += 1
+            if progress:
+                progress(done, len(futs))
     return reports
 
 

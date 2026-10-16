@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-tk
+
+      - name: Lint / compile check
+        run: |
+          python -m py_compile xray_forge/app.py xray_forge/__main__.py xray_forge.py
+          python -m py_compile xray_forge/core/*.py xray_forge/ui/*.py xray_forge/ui/tabs/*.py
+
+      - name: CLI smoke test
+        run: |
+          python -m xray_forge --help
+          python xray_forge.py --help
+
+      - name: GUI smoke test (launch + destroy)
+        run: |
+          python -c "
+import sys; sys.argv=['xray_forge']
+from xray_forge.app import App
+app = App()
+app.destroy()
+print('GUI smoke test passed')
+"
+
+      - name: Module feature tests
+        run: |
+          python - <<'PY'
+          import base64, os
+          from xray_forge.core.dedup import dedup_configs
+          from xray_forge.core.subscription import decode_subscription, is_base64_config
+          from xray_forge.core.settings import load_settings, save_settings
+          from xray_forge.core.parser import convert_block, export_to_clash, export_to_singbox, export_to_sub
+          lines=['vless://u1@1.1.1.1:443#a','vless://u1@1.1.1.1:443#b','vless://u2@2.2.2.2:443#c']
+          out,r=dedup_configs(lines); assert r==1 and len(out)==2
+          b64=base64.b64encode(b'vless://u@1.1.1.1:443#t').decode()
+          assert is_base64_config(b64) and decode_subscription(b64)==['vless://u@1.1.1.1:443#t']
+          save_settings({'k':'v'}); assert load_settings().get('k')=='v'
+          sp=os.path.join('xray_forge','settings.json')
+          if os.path.exists(sp): os.remove(sp)
+          text='vless://13b8ac3f-e8de-4b2d-82db-e9130d288a54@188.114.97.6:443?security=tls&sni=x&fp=chrome&type=ws&host=x&path=/#t'
+          lines,names,c=convert_block(text,'chrome','','',False,True,'{id}_{sub}',1)
+          assert c['fixed']==1
+          assert 'proxies' in export_to_clash(lines)
+          assert 'outbounds' in export_to_singbox(lines)
+          assert base64.b64decode(export_to_sub(lines))
+          print('module feature tests passed')
+          PY

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xray-forge"
+version = "2.0.0"
+description = "Full Xray config utility, tester, bridge, and IP finder"
+readme = "README.md"
+authors = [{ name = "Xray Forge Contributors" }]
+requires-python = ">=3.9"
+dependencies = [
+    "curl_cffi>=0.5.10",
+]
+
+[project.scripts]
+xray-forge = "xray_forge.__main__:main"

@@ -1,0 +1,22 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Python files
+*.py text diff=python
+
+# Markdown and docs
+*.md text
+*.rst text
+
+# Config / data
+*.json text
+*.toml text
+*.txt text
+*.yaml text
+*.yml text
+
+# Executables / binaries (do not normalize line endings)
+*.exe -text
+*.dll -text
+*.so -text
+*.bin -text

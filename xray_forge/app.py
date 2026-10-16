@@ -867,7 +867,7 @@ class App(tk.Tk):
             out = a._subs_mgr().fetch_all()
             lines, removed = a._subs_mgr().combined_lines()
         except Exception as e:
-            a.after(0, lambda: a.sub_status_var.set(f"fetch error: {e}"))
+            a.after(0, lambda err=e: a.sub_status_var.set(f"fetch error: {err}"))
             return
         n_src = len(out)
         a.after(0, a._subs_refresh_list)
@@ -915,7 +915,7 @@ class App(tk.Tk):
         try:
             reports = hc.run_health_checks(lines, **kwargs)
         except Exception as e:
-            a.after(0, lambda: a.sub_status_var.set(f"check error: {e}"))
+            a.after(0, lambda err=e: a.sub_status_var.set(f"check error: {err}"))
             a.after(0, a._subs_finish)
             return
         a._sub_reports = reports
@@ -1347,7 +1347,7 @@ class App(tk.Tk):
                         stop=a._stop_scan,
                         progress=lambda d, t: a.after(0, a._scan_progress, d, t))
         except Exception as e:
-            a.after(0, lambda: a.msg_var.set(f"scan error: {e}"))
+            a.after(0, lambda err=e: a.msg_var.set(f"scan error: {err}"))
         a.after(0, a._finish_scan)
 
     def _scan_progress(self, done: int, total: int) -> None:

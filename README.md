@@ -84,7 +84,8 @@ pip install ".[mitm]"     # cryptography, for MITM-DomainFronting CA generation
 | **⚙ Configs** | Paste raw configs → live-convert with fingerprint/cipher/fragment injection, renaming, and mass IP/port override |
 | **📡 Tester** | Fragmented TLS + WebSocket 101 + REAL delay through tunnel + exit-country detection |
 | **🧩 Xray Core** | Auto-detect/verify `xray.exe` (v2rayN, PATH, etc.) and test configs through the real engine via local SOCKS |
-| **🌐 IP Finder** | Geo lookup, anti-hijack DNS resolution (DoH + Iranian UDP + system), CIDR scanning with fragmented probes |
+| **🌐 IP Finder** | Geo lookup, anti-hijack DNS resolution (DoH + Iranian UDP + system), resumable CIDR scan sessions with CSV/JSON export |
+| **📥 Subscriptions** | Source manager (ETag cache) + staged health checks with scoring, technique tags, best-N subscription export |
 
 ## 📸 Screenshots
 
@@ -136,6 +137,7 @@ python -m xray_forge warp scan-endpoints --count 100
 python -m xray_forge subs add --url https://example.com/sub --name mylist
 python -m xray_forge subs fetch
 python -m xray_forge subs check --top 10 --out best.txt
+python -m xray_forge subs check --core auto   # non-VLESS configs via a real core
 ```
 
 ### Subcommand options
@@ -149,7 +151,7 @@ python -m xray_forge subs check --top 10 --out best.txt
 | `geo` | `IP` (empty = your own IP) |
 | `mitm` | `-o FILE --cn --gen-cert --groups google,meta,fastly --guide` |
 | `warp` | `register\|config\|scan-endpoints` · `--endpoint --count --workers` |
-| `subs` | `add\|list\|remove\|fetch\|check` · `--url --name --top --out --workers --timeout --no-throughput` |
+| `subs` | `add\|list\|remove\|fetch\|check` · `--url --name --top --out --workers --timeout --no-throughput --core auto\|xray\|singbox\|mihomo` |
 
 ---
 
@@ -202,7 +204,7 @@ python -m xray_forge subs check --top 10 --out best.txt
 
 ### 7. Subscription Pipeline (test on YOUR network)
 - **Source manager:** any number of subscription URLs with ETag-based caching, auto-detection of base64 / plain text / **Clash YAML** / **sing-box JSON**, and de-duplication across sources
-- **Staged health checks:** DNS (DoH) → TCP (latency + jitter) → TLS with **fragmentation variants** (the working variant is tagged) → real request through the tunnel → **download + upload throughput**
+- **Staged health checks:** DNS (DoH) → TCP (latency + jitter) → TLS with **fragmentation variants** (the working variant is tagged) → real request through the tunnel → **download + upload throughput**; protocols the native tunnel can't run (trojan, vmess, hysteria2, tuic, wireguard…) are checked through a locally spawned core (`--core auto`)
 - Why throughput: many Iranian networks throttle upload to foreign IPs — a config that passes a latency check can still be unusable; testing runs locally, on your own connection
 - **Ranking & output:** 0–100 score per config, best-N base64 subscription export, technique-tagged names (`name [fragment:5,94,1@2]`)
 

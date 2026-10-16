@@ -62,7 +62,7 @@ from code, never hard-coded.
   admin rights. Design as a separate helper process the app launches, not
   in-app code. Read upstream `injecter.py` / `fake_tcp.py` before designing.
 
-## Phase 3 — Subscription pipeline 🟡
+## Phase 3 — Subscription pipeline ✅
 
 Goal: test subscriptions **on the user's own network** — a CI-published
 list can't know what works from inside Iran, and upload-throttled networks
@@ -79,10 +79,13 @@ pass latency checks while being unusable.
 - ✅ Ranking + outputs: 0-100 score with stage weights, best-N base64
   subscription export, technique-tagged lines (`name [fragment:5,94,1@2]`).
   `xray_forge subs add|list|fetch|check --top N --out sub.txt`.
-- 🟡 GUI wiring: a "Subscriptions" tab over `sub_source` + `healthcheck`
-  (CLI fully functional).
-- ⬜ Core-backed request stage: run the request/throughput stages through
-  any installed core via SOCKS (native VLESS/WS tunnel only today).
+- ✅ GUI "Subscriptions" tab: source management (add/remove/enable), fetch-all,
+  ranked results with score / request latency / down+up throughput /
+  technique tags, best-N subscription export, "send working → Configs tab".
+- ✅ Core-backed stages: the request/throughput pipeline falls back to a
+  locally spawned core (`--core auto|xray|singbox|mihomo`) through its SOCKS
+  inbound, so trojan / vmess / ss / hysteria2 / tuic / wireguard configs get
+  full checks too (native VLESS/WS tunnel remains the fast path).
 
 ## Phase 4 — Scanner upgrades 🟡
 
@@ -91,7 +94,9 @@ pass latency checks while being unusable.
 - ✅ Latency + jitter measurement, optional country/ISP tagging per result.
 - ✅ CSV/JSON export, per-ISP grouping, known-ranges additions (Fastly).
 - ✅ CLI: `xray_forge scan CIDR --resume NAME --csv out.csv --json out.json --geo`.
-- 🟡 GUI: scan tab could expose resume + export (core ready).
+- ✅ GUI: IP Finder runs named resumable sessions (shared state with the CLI
+  under `~/.xray_forge/scans/`), with load/⟳, geo-tag toggle and CSV/JSON
+  export buttons; results tree shows jitter + exit country.
 - ⬜ SNI / fronting-host search mode (probe candidate SNIs against clean IPs).
 
 ## Phase 5 — New cores and transports 🟡
@@ -108,17 +113,24 @@ pass latency checks while being unusable.
 
 ## Phase 6 — Quality 🟡
 
-- ✅ Test suite: 107 tests — per-protocol fixtures + round-trips, core
+- ✅ Test suite: 127 tests — per-protocol fixtures + round-trips, core
   capability/client-config tests, golden export structure tests,
   subscription pipeline (ETag/cache/dedup), staged health-check pipeline
-  (offline, monkeypatched), scan sessions (resume/export), WARP RFC 7748
-  vectors, MITM-DF structure, seeded URI-parser fuzzing, CLI end-to-end.
+  (offline, monkeypatched; incl. core-backed stages), scan sessions
+  (resume/export), WARP RFC 7748 vectors, MITM-DF structure, seeded
+  URI-parser fuzzing, CLI end-to-end, GUI interaction tests.
 - ✅ Release workflow (`.github/workflows/release.yml`): on `v*` tags, runs
   tests, builds Windows/Linux single-file executables with PyInstaller,
   generates SHA-256 checksums, attaches to a GitHub Release.
-- ⬜ Signed releases (GPG/minisign) — checksums exist, signatures don't.
-- ⬜ Coverage report + CI badge.
-- ⬜ GUI test harness (headless interaction tests beyond the boot smoke).
+- 🟡 Signed releases: GPG detached signatures of the `.sha256` files are
+  produced by the workflow **when** repo secrets `GPG_PRIVATE_KEY`
+  (+ optional `GPG_PASSPHRASE`) are configured; checksums exist either way.
+- ✅ Coverage report: CI runs pytest with `--cov=xray_forge`
+  (term-missing + `coverage.xml` artifact, ubuntu/py3.12) and README has a
+  CI badge.
+- ✅ GUI test harness: `tests/test_gui.py` drives the real App headlessly
+  (module-scoped root, xvfb-run on Linux CI) — tabs, converter round-trip,
+  tester rows, subscriptions lists, scan-session load.
 
 ---
 

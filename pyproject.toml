@@ -13,5 +13,5 @@ dependencies = [
     "curl_cffi>=0.5.10",
 ]
 
-[project.scripts]
-xray-forge = "xray_forge.__main__:main"
+# Entry point is the root launcher:  python Xray_Forge.py
+# (kept out of [project.scripts] so the root Xray_Forge.py is the canonical entry).

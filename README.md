@@ -1,5 +1,7 @@
 # ⚡ Xray Forge (Modular Edition)
 
+[![CI](https://github.com/rezaxr14/Xray_Forge/actions/workflows/ci.yml/badge.svg)](https://github.com/rezaxr14/Xray_Forge/actions/workflows/ci.yml)
+
 A full-featured, modular Python utility for managing, fixing, testing, and exporting **VLESS / VMess / Trojan / Shadowsocks / Hysteria2 / TUIC / WireGuard-WARP** proxy configurations — with DPI-resistant probing, real core integration (Xray-core / sing-box / Mihomo), exit-country analytics, resumable IP scanning, a staged subscription health-check pipeline, and multi-format export.
 
 > 🇮🇷 Designed with anti-DPI and censorship-resistance in mind: fragmented ClientHello probes, fake SNI, domain fronting, a local MITM-DomainFronting generator, DoH-over-IP DNS, and real-tunnel exit-IP detection.

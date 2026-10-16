@@ -13,6 +13,12 @@ jobs:
     name: Build ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    env:
+      # Signing is optional: configure repo secrets GPG_PRIVATE_KEY
+      # (optionally GPG_PASSPHRASE) and the checksums get detached
+      # signatures attached to the release.
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
     strategy:
       fail-fast: false
       matrix:
@@ -77,6 +83,21 @@ jobs:
           sha256sum ${{ matrix.artifact }}.zip > ${{ matrix.artifact }}.zip.sha256
           cat ${{ matrix.artifact }}.zip.sha256
 
+      - name: Sign checksums (GPG, optional)
+        if: env.GPG_PRIVATE_KEY != ''
+        run: |
+          cd dist
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          for f in ./*.sha256; do
+            if [ -n "$GPG_PASSPHRASE" ]; then
+              echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
+                --pinentry-mode loopback --detach-sign --armor "$f"
+            else
+              gpg --batch --yes --detach-sign --armor "$f"
+            fi
+            echo "signed: $f"
+          done
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -84,6 +105,7 @@ jobs:
           path: |
             dist/${{ matrix.artifact }}.zip
             dist/${{ matrix.artifact }}.zip.sha256
+            dist/${{ matrix.artifact }}.zip.sha256.sig
 
   release:
     name: Attach binaries to GitHub Release
@@ -104,3 +126,4 @@ jobs:
           files: |
             dist/*.zip
             dist/*.sha256
+            dist/*.sha256.sig

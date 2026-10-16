@@ -5,12 +5,27 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    runs-on: windows-latest
+  test:
+    name: ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.12", "3.13"]
+    # One shell everywhere: PowerShell does not expand globs or support heredocs,
+    # which is what broke the old Windows-only job.
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,54 +33,53 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Tk and Xvfb (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-tk xvfb
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-tk
+          pip install pytest ruff
 
-      - name: Lint / compile check
-        run: |
-          python -m py_compile xray_forge/app.py xray_forge/__main__.py xray_forge.py
-          python -m py_compile xray_forge/core/*.py xray_forge/ui/*.py xray_forge/ui/tabs/*.py
+      - name: Compile check
+        run: python -m compileall -q xray_forge Xray_Forge.py
+
+      - name: Lint (syntax errors and undefined names only)
+        run: ruff check --select E9,F63,F7,F82 .
+
+      - name: Unit tests
+        run: python -m pytest tests -v
 
       - name: CLI smoke test
         run: |
           python -m xray_forge --help
-          python xray_forge.py --help
+          python Xray_Forge.py --help
+          printf 'vless://13b8ac3f-e8de-4b2d-82db-e9130d288a54@188.114.97.6:443?security=tls&sni=x&fp=chrome&type=ws&host=x&path=%%2F#t\n' > "$RUNNER_TEMP/in.txt"
+          python -m xray_forge convert "$RUNNER_TEMP/in.txt" "$RUNNER_TEMP/out.txt"
+          test -s "$RUNNER_TEMP/out.txt"
+          python -m xray_forge export "$RUNNER_TEMP/out.txt" "$RUNNER_TEMP/clash.yaml" --format clash
+          python -m xray_forge export "$RUNNER_TEMP/out.txt" "$RUNNER_TEMP/sb.json" --format singbox
+          test -s "$RUNNER_TEMP/clash.yaml" && test -s "$RUNNER_TEMP/sb.json"
 
-      - name: GUI smoke test (launch + destroy)
+      - name: GUI smoke test (launch and destroy)
         run: |
-          python -c "
-import sys; sys.argv=['xray_forge']
-from xray_forge.app import App
-app = App()
-app.destroy()
-print('GUI smoke test passed')
-"
-
-      - name: Module feature tests
-        run: |
-          python - <<'PY'
-          import base64, os
-          from xray_forge.core.dedup import dedup_configs
-          from xray_forge.core.subscription import decode_subscription, is_base64_config
-          from xray_forge.core.settings import load_settings, save_settings
-          from xray_forge.core.parser import convert_block, export_to_clash, export_to_singbox, export_to_sub
-          lines=['vless://u1@1.1.1.1:443#a','vless://u1@1.1.1.1:443#b','vless://u2@2.2.2.2:443#c']
-          out,r=dedup_configs(lines); assert r==1 and len(out)==2
-          b64=base64.b64encode(b'vless://u@1.1.1.1:443#t').decode()
-          assert is_base64_config(b64) and decode_subscription(b64)==['vless://u@1.1.1.1:443#t']
-          save_settings({'k':'v'}); assert load_settings().get('k')=='v'
-          sp=os.path.join('xray_forge','settings.json')
-          if os.path.exists(sp): os.remove(sp)
-          text='vless://13b8ac3f-e8de-4b2d-82db-e9130d288a54@188.114.97.6:443?security=tls&sni=x&fp=chrome&type=ws&host=x&path=/#t'
-          lines,names,c=convert_block(text,'chrome','','',False,True,'{id}_{sub}',1)
-          assert c['fixed']==1
-          assert 'proxies' in export_to_clash(lines)
-          assert 'outbounds' in export_to_singbox(lines)
-          assert base64.b64decode(export_to_sub(lines))
-          print('module feature tests passed')
+          cat > "$RUNNER_TEMP/gui_smoke.py" <<'PY'
+          from xray_forge.app import App
+          app = App()
+          app.update()
+          app.destroy()
+          print("GUI smoke test passed")
           PY
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a python "$RUNNER_TEMP/gui_smoke.py"
+          else
+            python "$RUNNER_TEMP/gui_smoke.py"
+          fi

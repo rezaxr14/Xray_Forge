@@ -2,6 +2,8 @@
 Custom Tkinter UI widgets: Tooltip, animated Switch toggle, etc.
 """
 
+from __future__ import annotations
+
 import tkinter as tk
 
 MONO = "Courier"

@@ -5,6 +5,8 @@ Saves/restores GUI state (form values, window size, tab positions) to a JSON
 file next to the application so the user's preferences survive restarts.
 """
 
+from __future__ import annotations
+
 import json
 import os
 from typing import Any
@@ -15,6 +17,17 @@ def settings_path() -> str:
     here = os.path.dirname(os.path.abspath(__file__))
     # Store settings next to the package for simplicity (portable).
     return os.path.join(os.path.dirname(here), "settings.json")
+
+
+def data_dir() -> str:
+    """Per-user data directory (~/.xray_forge) for caches, sources, accounts.
+
+    Created on first use.  Keeps user data out of the install directory so
+    the package works both from a source checkout and from an installed copy.
+    """
+    path = os.path.join(os.path.expanduser("~"), ".xray_forge")
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 def load_settings() -> dict[str, Any]:

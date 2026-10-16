@@ -10,6 +10,8 @@ Heavy-censorship evasion techniques (patterniha MMDF / gfw-knocker / Xray-core f
   - TCP Fast Open, User-Agent rotation
 """
 
+from __future__ import annotations
+
 import base64
 import importlib.util
 import json

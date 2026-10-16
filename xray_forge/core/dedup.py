@@ -5,6 +5,8 @@ Removes duplicate proxy configurations based on (scheme, uuid, host, port)
 so the user's list stays clean.
 """
 
+from __future__ import annotations
+
 from typing import Any
 from xray_forge.core.parser import parse_target
 

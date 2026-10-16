@@ -1,6 +1,11 @@
 """
 Config parsing, normalization, URI mutation, naming engine, and multi-format exporters.
+
+``parse_target`` returns a typed :class:`xray_forge.core.models.Outbound`
+(kept dict-accessible for backwards compatibility).
 """
+
+from __future__ import annotations
 
 import base64
 import json
@@ -9,6 +14,11 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode, quote, unquote
 
 from xray_forge.core.config import PROXY_SCHEMES, IPV4_RE
+from xray_forge.core.models import Outbound, b64_decode_pad, vmess_json_to_outbound
+
+# Schemes that parse_target understands (superset of PROXY_SCHEMES, which is
+# the set the converter is allowed to inject fp/cs/fm into).
+PARSE_SCHEMES = PROXY_SCHEMES | {"hysteria2", "hy2", "tuic", "wireguard", "wg"}
 
 
 def classify_endpoint(v: str) -> str | None:
@@ -245,12 +255,130 @@ def convert_block(text: str, fp: str, cs: str, fm: str, tls_only: bool,
     return lines, names, counts
 
 
-def parse_target(line: str) -> dict[str, str] | None:
+# ---------------------------------------------------------------------------
+# parse_target -> Outbound
+# ---------------------------------------------------------------------------
+
+def _parse_ss(line: str, parts) -> Outbound | None:
+    """SIP002 (ss://base64url(method:pass)@host:port) and legacy
+    (ss://base64(method:password@host:port)) forms."""
+    params = {}
+    for k, v in parse_qsl(parts.query, keep_blank_values=True):
+        params.setdefault(k.lower(), v)
+    name = unquote(parts.fragment) or ""
+    userinfo = parts.username or ""
+    if parts.netloc and "@" not in parts.netloc:
+        # legacy: whole netloc is base64 of method:password@host:port
+        try:
+            decoded = b64_decode_pad(parts.netloc)
+        except ValueError:
+            return None
+        cred, _, hostport_ = decoded.rpartition("@")
+        host, port = split_netloc(hostport_)
+        method, _, password = cred.partition(":")
+        if not host:
+            return None
+        return Outbound(scheme="ss", name=name or f"{host}:{port}", host=host,
+                        port=port or "443", credential=password,
+                        ss_method=method, transport="tcp", raw=line.strip(),
+                        extra={"plugin": params.get("plugin", "")})
+    # SIP002: userinfo may be plain "method:password" or base64url of it
+    method, password = "", ""
+    if ":" in userinfo:
+        method, password = userinfo.split(":", 1)
+    else:
+        try:
+            cred = b64_decode_pad(userinfo)
+            method, _, password = cred.partition(":")
+        except ValueError:
+            return None
+    host, port = split_netloc(parts.netloc)
+    if not host or not method:
+        return None
+    return Outbound(scheme="ss", name=name or f"{host}:{port}", host=host,
+                    port=port or "443", credential=unquote(password),
+                    ss_method=unquote(method), transport="tcp",
+                    allow_insecure=False, raw=line.strip(),
+                    extra={"plugin": params.get("plugin", "")})
+
+
+def _parse_hysteria2(line: str, parts) -> Outbound | None:
+    host, port = split_netloc(parts.netloc)
+    if not host:
+        return None
+    params: dict[str, str] = {}
+    for k, v in parse_qsl(parts.query, keep_blank_values=True):
+        params.setdefault(k.lower(), v)
+    password = unquote(parts.username or "") or parts.password or ""
+    name = unquote(parts.fragment) or f"{host}:{port}"
+    return Outbound(
+        scheme="hysteria2", name=name, host=host, port=port or "443",
+        credential=password,
+        transport="udp", security="tls",
+        sni=params.get("sni", "") or host,
+        fingerprint=params.get("fp", "chrome"),
+        allow_insecure=params.get("insecure", "0") in ("1", "true"),
+        alpn="h3",
+        extra={"obfs": params.get("obfs", ""),
+               "obfs-password": params.get("obfs-password", ""),
+               "up": params.get("up", ""), "down": params.get("down", "")},
+        raw=line.strip())
+
+
+def _parse_tuic(line: str, parts) -> Outbound | None:
+    host, port = split_netloc(parts.netloc)
+    if not host:
+        return None
+    params: dict[str, str] = {}
+    for k, v in parse_qsl(parts.query, keep_blank_values=True):
+        params.setdefault(k.lower(), v)
+    uuid_s = unquote(parts.username or "")
+    password = unquote(parts.password or "") if parts.password else ""
+    name = unquote(parts.fragment) or f"{host}:{port}"
+    return Outbound(
+        scheme="tuic", name=name, host=host, port=port or "443",
+        credential=uuid_s,
+        transport="udp", security="tls",
+        sni=params.get("sni", "") or host,
+        fingerprint=params.get("fp", "chrome"),
+        allow_insecure=params.get("insecure", "0") in ("1", "true"),
+        alpn=params.get("alpn", "h3"),
+        extra={"password": password,
+               "congestion_control": params.get("congestion_control", "bbr"),
+               "udp_relay_mode": params.get("udp_relay_mode", "native")},
+        raw=line.strip())
+
+
+def parse_target(line: str) -> Outbound | None:
+    """Parse any supported share-link into an :class:`Outbound`.
+
+    Returns ``None`` for lines that are not recognized proxy URIs.
+    """
+    line = (line or "").strip()
+    if not line or "://" not in line:
+        return None
     try:
-        parts = urlsplit(line.strip())
+        parts = urlsplit(line)
     except ValueError:
         return None
-    if parts.scheme.lower() not in PROXY_SCHEMES or "@" not in parts.netloc:
+    scheme = parts.scheme.lower()
+
+    if scheme == "vmess":
+        if "@" in parts.netloc:
+            # rare plain vmess URI — treat like vless-style netloc
+            pass
+        else:
+            return vmess_json_to_outbound(line[len("vmess://"):], line)
+    if scheme == "ss":
+        return _parse_ss(line, parts)
+    if scheme in ("hysteria2", "hy2"):
+        return _parse_hysteria2(line, parts)
+    if scheme == "tuic":
+        return _parse_tuic(line, parts)
+    if scheme in ("wireguard", "wg"):
+        return None  # wireguard has no share-link form; built from accounts
+
+    if scheme not in PROXY_SCHEMES or "@" not in parts.netloc:
         return None
     host, port = split_netloc(parts.netloc)
     if not host:
@@ -264,151 +392,260 @@ def parse_target(line: str) -> dict[str, str] | None:
     if not path.startswith("/"):
         path = "/" + path
     name = unquote(parts.fragment) or f"{host}:{port}"
-    uuid_s = unquote(parts.username or "")
-    transport = pd.get("type", "ws").lower()
+    credential = unquote(parts.username or "")
+    if parts.password:
+        credential += ":" + unquote(parts.password)
     security = pd.get("security", "").lower()
-    fp = pd.get("fp", "chrome")
-    alpn = pd.get("alpn", "")
-    service_name = pd.get("servicename", "") or pd.get("service_name", "")
-    return {
-        "name": name,
-        "scheme": parts.scheme.lower(),
-        "host": host,
-        "port": port or "443",
-        "sni": sni,
-        "hdr": hdr,
-        "path": path,
-        "uuid": uuid_s,
-        "type": transport,
-        "security": security,
-        "fp": fp,
-        "alpn": alpn,
-        "service_name": service_name,
-        "raw": line.strip()
+    return Outbound(
+        name=name,
+        scheme=scheme,
+        host=host,
+        port=port or "443",
+        credential=credential,
+        transport=pd.get("type", "ws").lower(),
+        security="reality" if security == "reality" else security,
+        sni=sni,
+        host_header=hdr,
+        path=path,
+        fingerprint=pd.get("fp", "chrome"),
+        alpn=pd.get("alpn", ""),
+        service_name=pd.get("servicename", "") or pd.get("service_name", ""),
+        header_type=pd.get("headerType", ""),
+        flow=pd.get("flow", ""),
+        public_key=pd.get("pbk", ""),
+        short_id=pd.get("sid", ""),
+        spider_x=pd.get("spx", ""),
+        allow_insecure=pd.get("allowInsecure", "0") in ("1", "true"),
+        extra={"cs": pd.get("cs", "")},
+        raw=line,
+    )
+
+
+# ===========================================================================
+# Exporters: Clash Meta (Mihomo) / Sing-box / Subscription
+# ===========================================================================
+
+def _transport_fields(t: Outbound) -> dict[str, Any]:
+    """Common transport fields used by both exporters."""
+    tr = t.transport.lower()
+    fields: dict[str, Any] = {}
+    if tr == "ws":
+        fields["network"] = "ws"
+        fields["ws_path"] = t.path
+        fields["ws_host"] = t.host_header
+    elif tr == "grpc":
+        fields["network"] = "grpc"
+        fields["service_name"] = t.service_name
+    elif tr == "httpupgrade":
+        fields["network"] = "httpupgrade"
+        fields["ws_path"] = t.path
+        fields["ws_host"] = t.host_header
+    elif tr == "xhttp":
+        fields["network"] = "xhttp"
+        fields["ws_path"] = t.path
+        fields["ws_host"] = t.host_header
+        fields["xhttp_mode"] = t.extra.get("mode", "auto")
+    return fields
+
+
+def out_to_clash(t: Outbound) -> dict[str, Any] | None:
+    """One Clash Meta (Mihomo) proxy mapping from an Outbound."""
+    px: dict[str, Any] = {
+        "name": t.name,
+        "type": {"hysteria2": "hysteria2", "tuic": "tuic",
+                 "wireguard": "wireguard"}.get(t.scheme, t.scheme),
+        "server": t.host,
+        "port": int(t.port) if str(t.port).isdigit() else 443,
     }
+    tr = _transport_fields(t)
+    if t.scheme == "vless":
+        px["uuid"] = t.credential
+        px["cipher"] = "none" if t.security == "reality" else "auto"
+        if t.flow:
+            px["flow"] = t.flow
+    elif t.scheme == "vmess":
+        px["uuid"] = t.credential
+        px["alterId"] = int(t.alter_id) if str(t.alter_id).isdigit() else 0
+        px["cipher"] = t.encryption or "auto"
+    elif t.scheme == "trojan":
+        px["password"] = t.credential
+    elif t.scheme == "ss":
+        method, password = t.ss_split()
+        px["cipher"] = method
+        px["password"] = password
+        if t.extra.get("plugin"):
+            px["plugin"] = t.extra["plugin"]
+        return px  # ss has no transport/tls section
+    elif t.scheme == "hysteria2":
+        px["password"] = t.credential
+        px["up"] = t.extra.get("up", "") or "50 Mbps"
+        px["down"] = t.extra.get("down", "") or "100 Mbps"
+        if t.extra.get("obfs"):
+            px["obfs"] = t.extra["obfs"]
+            if t.extra.get("obfs-password"):
+                px["obfs-password"] = t.extra["obfs-password"]
+    elif t.scheme == "tuic":
+        px["uuid"] = t.credential
+        px["password"] = t.extra.get("password", "")
+        px["congestion-controller"] = t.extra.get("congestion_control", "bbr")
+        px["udp-relay-mode"] = t.extra.get("udp_relay_mode", "native")
+    elif t.scheme == "wireguard":
+        ex = t.extra
+        px["private-key"] = ex.get("private_key", "")
+        px["public-key"] = ex.get("peer_public_key", "")
+        px["ip"] = (ex.get("ipv4") or "172.16.0.2").split("/")[0]
+        px["ipv6"] = (ex.get("ipv6") or "").split("/")[0] or None
+        px["mtu"] = int(ex.get("mtu", 1280))
+        if ex.get("reserved"):
+            px["reserved"] = ex["reserved"]
+        px = {k: v for k, v in px.items() if v not in (None, "")}
+        return px
+    else:
+        return None
+
+    if t.security in ("tls", "reality"):
+        px["tls"] = True
+        px["servername"] = t.sni or t.host
+        px["client-fingerprint"] = t.fingerprint or "chrome"
+        px["skip-cert-verify"] = t.allow_insecure
+        if t.security == "reality":
+            ro: dict[str, str] = {}
+            if t.public_key:
+                ro["public-key"] = t.public_key
+            if t.short_id:
+                ro["short-id"] = t.short_id
+            px["reality-opts"] = ro
+        if t.alpn:
+            px["alpn"] = [a.strip() for a in t.alpn.split(",") if a.strip()]
+    elif t.scheme in ("hysteria2", "tuic"):
+        px["sni"] = t.sni or t.host
+        px["skip-cert-verify"] = t.allow_insecure
+
+    if tr.get("network") == "ws":
+        px["network"] = "ws"
+        px["ws-opts"] = {"path": tr["ws_path"], "headers": {"Host": tr["ws_host"]}}
+    elif tr.get("network") == "grpc":
+        px["network"] = "grpc"
+        px["grpc-opts"] = {"grpc-service-name": tr["service_name"]}
+    elif tr.get("network") == "httpupgrade":
+        px["network"] = "httpupgrade"
+        px["httpupgrade-opts"] = {"path": tr["ws_path"], "host": tr["ws_host"]}
+    # xhttp is xray-only: no clash transport emitted
+    return px
 
 
-# ===========================================================================
-# Exporters: Clash Meta / Sing-box / Subscription
-# ===========================================================================
+def out_to_singbox(t: Outbound) -> dict[str, Any] | None:
+    """One sing-box outbound mapping from an Outbound."""
+    ob: dict[str, Any] = {
+        "tag": t.name,
+        "type": t.scheme,
+        "server": t.host,
+        "server_port": int(t.port) if str(t.port).isdigit() else 443,
+    }
+    tr = _transport_fields(t)
+    if t.scheme == "vless":
+        ob["uuid"] = t.credential
+        if t.flow:
+            ob["flow"] = t.flow
+    elif t.scheme == "vmess":
+        ob["uuid"] = t.credential
+        ob["alter_id"] = int(t.alter_id) if str(t.alter_id).isdigit() else 0
+        ob["security"] = t.encryption or "auto"
+    elif t.scheme == "trojan":
+        ob["password"] = t.credential
+    elif t.scheme == "ss":
+        method, password = t.ss_split()
+        ob["method"] = method
+        ob["password"] = password
+        return ob
+    elif t.scheme == "hysteria2":
+        ob["password"] = t.credential
+        if t.extra.get("obfs"):
+            ob["obfs"] = {"type": t.extra["obfs"],
+                          "password": t.extra.get("obfs-password", "")}
+    elif t.scheme == "tuic":
+        ob["uuid"] = t.credential
+        ob["password"] = t.extra.get("password", "")
+        ob["congestion_control"] = t.extra.get("congestion_control", "bbr")
+        ob["udp_relay_mode"] = t.extra.get("udp_relay_mode", "native")
+    elif t.scheme == "wireguard":
+        ex = t.extra
+        ob["type"] = "wireguard"
+        ob["local_address"] = [a for a in (ex.get("ipv4"), ex.get("ipv6")) if a]
+        ob["private_key"] = ex.get("private_key", "")
+        ob["peer_public_key"] = ex.get("peer_public_key", "")
+        if ex.get("reserved"):
+            ob["reserved"] = ex["reserved"]
+        ob["mtu"] = int(ex.get("mtu", 1280))
+        ob["local_address"] = [a for a in ob["local_address"] if a] or ["172.16.0.2/32"]
+        return ob
+    else:
+        return None
 
-def export_to_clash(lines: list[str]) -> str:
-    """Export proxy lines to Clash Meta (Mihomo) YAML format."""
-    proxies = []
-    names = []
-    for line in lines:
-        t = parse_target(line)
+    if t.security in ("tls", "reality"):
+        tls: dict[str, Any] = {
+            "enabled": True,
+            "server_name": t.sni or t.host,
+            "insecure": t.allow_insecure,
+        }
+        if t.security == "reality":
+            tls["reality"] = {"enabled": True}
+            if t.public_key:
+                tls["reality"]["public_key"] = t.public_key
+            if t.short_id:
+                tls["reality"]["short_id"] = t.short_id
+        else:
+            tls["utls"] = {"enabled": True,
+                           "fingerprint": t.fingerprint or "chrome"}
+        if t.alpn:
+            tls["alpn"] = [a.strip() for a in t.alpn.split(",") if a.strip()]
+        ob["tls"] = tls
+    elif t.scheme in ("hysteria2", "tuic"):
+        ob["tls"] = {"enabled": True, "server_name": t.sni or t.host,
+                     "insecure": t.allow_insecure}
+
+    if tr.get("network") == "ws":
+        ob["transport"] = {"type": "ws", "path": tr["ws_path"],
+                           "headers": {"Host": tr["ws_host"]}}
+    elif tr.get("network") == "grpc":
+        ob["transport"] = {"type": "grpc", "service_name": tr["service_name"]}
+    elif tr.get("network") == "httpupgrade":
+        ob["transport"] = {"type": "httpupgrade", "path": tr["ws_path"],
+                           "host": tr["ws_host"]}
+    return ob
+
+
+def export_to_clash(lines: list[str] | list[Outbound]) -> str:
+    """Export proxy lines/outbounds to Clash Meta (Mihomo) YAML format."""
+    proxies: list[dict[str, Any]] = []
+    for item in lines:
+        t = item if isinstance(item, Outbound) else parse_target(item)
         if not t:
             continue
-        px: dict[str, Any] = {
-            "name": t["name"],
-            "type": t["scheme"],
-            "server": t["host"],
-            "port": int(t["port"]),
-        }
-        if t["scheme"] == "vless":
-            px["uuid"] = t["uuid"]
-            px["cipher"] = "auto"
-        elif t["scheme"] == "trojan":
-            px["password"] = t["uuid"]
-
-        if t["security"] in ("tls", "reality"):
-            px["tls"] = True
-            px["servername"] = t["sni"]
-            px["client-fingerprint"] = t["fp"]
-            if t["security"] == "reality":
-                px["reality-opts"] = {"public-key": "", "short-id": ""}
-
-        if t["type"] == "ws":
-            px["network"] = "ws"
-            px["ws-opts"] = {
-                "path": t["path"],
-                "headers": {"Host": t["hdr"]}
-            }
-        elif t["type"] == "grpc":
-            px["network"] = "grpc"
-            px["grpc-opts"] = {"grpc-service-name": t["service_name"]}
-        elif t["type"] == "httpupgrade":
-            px["network"] = "httpupgrade"
-            px["httpupgrade-opts"] = {"path": t["path"], "host": t["hdr"]}
-
-        proxies.append(px)
-        names.append(t["name"])
-
-    import yaml
+        px = out_to_clash(t)
+        if px:
+            proxies.append(px)
     try:
-        yaml_out = yaml.dump({"proxies": proxies}, sort_keys=False, allow_unicode=True)
+        import yaml
     except ImportError:
-        # Fallback JSON-like YAML dump
-        lines_out = ["proxies:"]
+        # Minimal fallback (no PyYAML available): JSON flow-style YAML.
+        out = ["proxies:"]
         for p in proxies:
-            lines_out.append(f"  - name: \"{p['name']}\"")
-            lines_out.append(f"    type: {p['type']}")
-            lines_out.append(f"    server: {p['server']}")
-            lines_out.append(f"    port: {p['port']}")
-            if "uuid" in p:
-                lines_out.append(f"    uuid: {p['uuid']}")
-            if "password" in p:
-                lines_out.append(f"    password: {p['password']}")
-            if p.get("tls"):
-                lines_out.append("    tls: true")
-                lines_out.append(f"    servername: {p.get('servername')}")
-                lines_out.append(f"    client-fingerprint: {p.get('client-fingerprint', 'chrome')}")
-            if p.get("network") == "ws":
-                lines_out.append("    network: ws")
-                lines_out.append("    ws-opts:")
-                lines_out.append(f"      path: \"{p['ws-opts']['path']}\"")
-                lines_out.append("      headers:")
-                lines_out.append(f"        Host: \"{p['ws-opts']['headers']['Host']}\"")
-        yaml_out = "\n".join(lines_out)
-    return yaml_out
+            out.append("  - " + json.dumps(p, ensure_ascii=False))
+        return "\n".join(out)
+    return yaml.dump({"proxies": proxies}, sort_keys=False, allow_unicode=True)
 
 
-def export_to_singbox(lines: list[str]) -> str:
-    """Export proxy lines to Sing-box outbounds format."""
-    outbounds = []
-    for line in lines:
-        t = parse_target(line)
+def export_to_singbox(lines: list[str] | list[Outbound]) -> str:
+    """Export proxy lines/outbounds to Sing-box outbounds format."""
+    outbounds: list[dict[str, Any]] = []
+    for item in lines:
+        t = item if isinstance(item, Outbound) else parse_target(item)
         if not t:
             continue
-        ob: dict[str, Any] = {
-            "tag": t["name"],
-            "type": t["scheme"],
-            "server": t["host"],
-            "server_port": int(t["port"]),
-        }
-        if t["scheme"] == "vless":
-            ob["uuid"] = t["uuid"]
-        elif t["scheme"] == "trojan":
-            ob["password"] = t["uuid"]
-
-        if t["security"] in ("tls", "reality"):
-            ob["tls"] = {
-                "enabled": True,
-                "server_name": t["sni"],
-                "utls": {
-                    "enabled": True,
-                    "fingerprint": t["fp"]
-                }
-            }
-        if t["type"] == "ws":
-            ob["transport"] = {
-                "type": "ws",
-                "path": t["path"],
-                "headers": {"Host": t["hdr"]}
-            }
-        elif t["type"] == "grpc":
-            ob["transport"] = {
-                "type": "grpc",
-                "service_name": t["service_name"]
-            }
-        elif t["type"] == "httpupgrade":
-            ob["transport"] = {
-                "type": "httpupgrade",
-                "path": t["path"],
-                "host": t["hdr"]
-            }
-        outbounds.append(ob)
+        ob = out_to_singbox(t)
+        if ob:
+            outbounds.append(ob)
     return json.dumps({"outbounds": outbounds}, indent=2, ensure_ascii=False)
 
 

@@ -4,14 +4,29 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xray-forge"
-version = "2.0.0"
-description = "Full Xray config utility, tester, bridge, and IP finder"
+version = "2.1.0"
+description = "Full Xray config utility, tester, bridge, IP finder, subscription health-checker"
 readme = "README.md"
 authors = [{ name = "Xray Forge Contributors" }]
-requires-python = ">=3.9"
+# 3.10+ required: the codebase uses PEP 604 unions at runtime
+# (modules also carry `from __future__ import annotations` for safety).
+requires-python = ">=3.10"
 dependencies = [
     "curl_cffi>=0.5.10",
+    "PyYAML>=6.0",
 ]
 
-# Entry point is the root launcher:  python Xray_Forge.py
-# (kept out of [project.scripts] so the root Xray_Forge.py is the canonical entry).
+[project.optional-dependencies]
+# MITM-DomainFronting per-user CA generation
+mitm = ["cryptography>=42.0"]
+# development / CI
+dev = ["pytest>=8.0", "ruff>=0.4", "cryptography>=42.0"]
+
+[project.scripts]
+xray-forge = "xray_forge.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["xray_forge*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

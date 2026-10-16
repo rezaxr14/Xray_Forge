@@ -2,6 +2,8 @@
 Shared formatting helpers used by tester, scanner, and exporters.
 """
 
+from __future__ import annotations
+
 
 def fmt_ms(v):
     if isinstance(v, (int, float)):

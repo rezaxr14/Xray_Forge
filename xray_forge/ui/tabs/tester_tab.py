@@ -2,6 +2,8 @@
 Tab · Tester: fragmented probes, REAL delay, exit-country, core testing.
 """
 
+from __future__ import annotations
+
 import tkinter as tk
 from tkinter import ttk
 

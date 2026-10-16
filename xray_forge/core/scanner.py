@@ -2,6 +2,8 @@
 IP scanning, anti-hijack DNS resolution, CIDR sampling, and GeoIP lookup.
 """
 
+from __future__ import annotations
+
 import ipaddress
 import os
 import random
@@ -103,6 +105,57 @@ def resolve_dns_all(host: str) -> dict[str, list[str]]:
 
 _CC_CACHE: dict[str, str] = {}
 _CC_LOCK = threading.Lock()
+
+# (cc, isp) cache — keyed by ip
+_META_CACHE: dict[str, tuple[str, str]] = {}
+_META_LOCK = threading.Lock()
+
+
+def ip_meta(ip: str, timeout: float = 5.0) -> tuple[str, str]:
+    """Return (country_code, isp) for an IP, cached. ("","") on failure."""
+    if not ip:
+        return "", ""
+    with _META_LOCK:
+        if ip in _META_CACHE:
+            return _META_CACHE[ip]
+    cc, isp = "", ""
+    try:
+        d = fetch_json(
+            f"http://ip-api.com/json/{ip}?fields=status,countryCode,isp",
+            timeout=timeout)
+        if isinstance(d, dict):
+            v = d.get("countryCode")
+            if isinstance(v, str) and len(v) == 2 and v.isalpha():
+                cc = v.upper()
+            isp = str(d.get("isp") or "")[:40]
+    except Exception:
+        pass
+    with _META_LOCK:
+        _META_CACHE[ip] = (cc, isp)
+    return cc, isp
+
+
+def tcp_jitter(host: str, port: str, attempts: int = 3,
+               timeout: float = 3.0) -> tuple[float | None, float]:
+    """Best connect latency and jitter (max-min over successful samples)."""
+    samples: list[float] = []
+    for _ in range(max(2, attempts)):
+        if len(samples) >= attempts:
+            break
+        t0 = __import__("time").perf_counter()
+        try:
+            s = socket.create_connection((host, int(port)), timeout=timeout)
+            s.close()
+        except OSError:
+            continue
+        samples.append((__import__("time").perf_counter() - t0) * 1000)
+    if not samples:
+        return None, 0.0
+    best = min(samples)
+    jitter = (max(samples) - min(samples)) if len(samples) > 1 else 0.0
+    return best, jitter
+
+
 
 
 def cc_of_ip(ip: str, timeout: float = 4.0) -> str:

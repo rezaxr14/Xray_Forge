@@ -5,6 +5,8 @@ Xray Forge — modular edition.  Entry point lives at repo root (xray_forge.py)
 while the package (xray_forge/) holds the real code.
 """
 
+from __future__ import annotations
+
 import argparse
 import base64
 import json
@@ -64,6 +66,8 @@ from xray_forge.ui.tabs.converter_tab import build as build_converter_pane
 from xray_forge.ui.tabs.tester_tab import build as build_tester
 from xray_forge.ui.tabs.xray_tab import build as build_xray_tab
 from xray_forge.ui.tabs.scanner_tab import build as build_scanner
+
+from tkinter import simpledialog  # noqa: F401  (tk.simpledialog usage below)
 
 TextState = Literal["normal", "disabled"]
 
@@ -1237,177 +1241,8 @@ class App(tk.Tk):
         a.destroy()
 
 
-def parse_frag_if_avail(s: str):
-    from xray_forge.core.probe import parse_frag
-    return parse_frag(s)
+# Compatibility alias (the CLI and GUI both use parse_frag directly).
+from xray_forge.core.probe import parse_frag as parse_frag_if_avail  # noqa: E402
 
-
-# ===========================================================================
-# CLI
-# ===========================================================================
-
-def cli_convert(infile: str, outfile: str, fp: str, cs: str, fm: str,
-                ip: str | None, port: str | None, template: str,
-                start: int, no_rename: bool, ip_only: bool,
-                no_fp: bool, no_cs: bool, no_fm: bool,
-                all_security: bool, dedup: bool) -> None:
-    with open(infile, "r", encoding="utf-8", errors="replace") as f:
-        text = f.read()
-    tls_only = not all_security
-    rename = not no_rename
-    want_fp = (not no_fp) and (not ip_only)
-    want_cs = (not no_cs) and (not ip_only)
-    want_fm = (not no_fm) and (not ip_only)
-    ov_ip = ip or ""
-    ov_port = port or ""
-    lines, names, c = convert_block(
-        text, fp, cs, fm, tls_only, rename, template, start,
-        ov_ip, ov_port, want_fp, want_cs, want_fm)
-    if dedup:
-        lines, removed = dedup_configs(lines)
-    with open(outfile, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-    print(f"converted {c['fixed']} fixed · {c['unchanged']} unchanged · "
-          f"{c['skipped']} skipped → {outfile}")
-
-
-def cli_export(infile: str, fmt_name: str, outfile: str) -> None:
-    with open(infile, "r", encoding="utf-8", errors="replace") as f:
-        text = f.read()
-    lines = [l for l in text.splitlines() if l.strip()]
-    if fmt_name == "clash":
-        out = export_to_clash(lines)
-    elif fmt_name == "singbox":
-        out = export_to_singbox(lines)
-    elif fmt_name == "sub":
-        out = export_to_sub(lines)
-    else:
-        raise SystemExit(f"unknown format: {fmt_name}")
-    with open(outfile, "w", encoding="utf-8") as f:
-        f.write(out)
-    print(f"exported {len(lines)} configs as {fmt_name} → {outfile}")
-
-
-def cli_test(infile: str, timeout: float, frag_s: str = "5,94,1@2",
-             core: str | None = None) -> None:
-    with open(infile, "r", encoding="utf-8", errors="replace") as f:
-        text = f.read()
-    lines = [l for l in text.splitlines() if l.strip()]
-    frag = parse_frag_if_avail(frag_s)
-    for line in lines:
-        t = parse_target(line)
-        if not t:
-            print(f"skip: {line[:60]}")
-            continue
-        if core:
-            r = xray_probe(line, core, frag_on=True, timeout=timeout)
-            print(f"{t['name']} | real={r.get('real')} cc={r.get('cc')} "
-                  f"ip={r.get('exit_ip')} status={r.get('status')}")
-        else:
-            try:
-                tcp = tcp_ping(t["host"], t["port"], timeout=timeout)
-                tc, sock, info = tls_connect(
-                    t["host"], t["port"], sni=t["sni"], frag=frag,
-                    timeout=timeout)
-                line2, wms = ws_upgrade(tc, t["hdr"], t["path"], timeout)
-                print(f"{t['name']} | tcp={tcp} tls={info['tls_ms']:.0f} "
-                      f"ws={wms:.0f} line={line2[:30]}")
-                sock.close()
-            except Exception as e:
-                print(f"{t['name']} | error: {e}")
-
-
-def cli_scan(cidr: str, count: int, sni: str | None, port: str,
-             workers: int, frag_s: str) -> None:
-    ips = sample_cidr(cidr, count)
-    frag = parse_frag_if_avail(frag_s)
-    alive = 0
-    for ip in ips:
-        try:
-            if sni:
-                tc, sock, info = tls_connect(ip, port, sni=sni, frag=frag,
-                                             timeout=6.0)
-                sock.close()
-            else:
-                s = socket.create_connection((ip, int(port)), timeout=4.0)
-                s.close()
-            alive += 1
-            print(f"alive: {ip}:{port}")
-        except Exception:
-            pass
-    print(f"scan done — {alive}/{len(ips)} alive")
-
-
-def cli_geo(ip: str | None) -> None:
-    print(geo_lookup(ip or ""))
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="xray-forge",
-        description="Xray Forge — VLESS/Trojan/VMess/SS config utility")
-    sub = parser.add_subparsers(dest="cmd")
-
-    p_gui = sub.add_parser("gui", help="launch GUI (default)")
-    p_conv = sub.add_parser("convert", help="convert configs")
-    p_conv.add_argument("infile")
-    p_conv.add_argument("outfile")
-    p_conv.add_argument("--fp", default=DEFAULT_FP)
-    p_conv.add_argument("--cs", default=DEFAULT_CS)
-    p_conv.add_argument("--fm", default=json.dumps(DEFAULT_FM, separators=(",", ":")))
-    p_conv.add_argument("--ip")
-    p_conv.add_argument("--port")
-    p_conv.add_argument("--template", default=DEFAULT_TEMPLATE)
-    p_conv.add_argument("--start", type=int, default=1)
-    p_conv.add_argument("--no-rename", action="store_true")
-    p_conv.add_argument("--ip-only", action="store_true")
-    p_conv.add_argument("--no-fp", action="store_true")
-    p_conv.add_argument("--no-cs", action="store_true")
-    p_conv.add_argument("--no-fm", action="store_true")
-    p_conv.add_argument("--all-security", action="store_true")
-    p_conv.add_argument("--dedup", action="store_true")
-
-    p_exp = sub.add_parser("export", help="export configs")
-    p_exp.add_argument("infile")
-    p_exp.add_argument("outfile")
-    p_exp.add_argument("--format", choices=["clash", "singbox", "sub"],
-                       required=True)
-
-    p_test = sub.add_parser("test", help="test configs")
-    p_test.add_argument("infile")
-    p_test.add_argument("--timeout", type=float, default=8.0)
-    p_test.add_argument("--frag", default="5,94,1@2")
-    p_test.add_argument("--core", default=None)
-
-    p_scan = sub.add_parser("scan", help="scan CIDR")
-    p_scan.add_argument("cidr")
-    p_scan.add_argument("--count", type=int, default=200)
-    p_scan.add_argument("--sni", default=None)
-    p_scan.add_argument("--port", default="443")
-    p_scan.add_argument("--workers", type=int, default=64)
-    p_scan.add_argument("--frag", default="5,94,1@2")
-
-    p_geo = sub.add_parser("geo", help="geo lookup")
-    p_geo.add_argument("ip", nargs="?", default=None)
-
-    args = parser.parse_args(argv)
-    if args.cmd == "convert":
-        cli_convert(args.infile, args.outfile, args.fp, args.cs, args.fm,
-                    args.ip, args.port, args.template, args.start,
-                    args.no_rename, args.ip_only, args.no_fp, args.no_cs,
-                    args.no_fm, args.all_security, args.dedup)
-    elif args.cmd == "export":
-        cli_export(args.infile, args.format, args.outfile)
-    elif args.cmd == "test":
-        cli_test(args.infile, args.timeout, args.frag, args.core)
-    elif args.cmd == "scan":
-        cli_scan(args.cidr, args.count, args.sni, args.port,
-                 args.workers, args.frag)
-    elif args.cmd == "geo":
-        cli_geo(args.ip)
-    else:
-        # default: launch GUI
-        app = App()
-        app.mainloop()
-        return 0
-    return 0
+# Headless CLI entry point: keep `from xray_forge.app import main` working.
+from xray_forge.cli import main  # noqa: E402,F401

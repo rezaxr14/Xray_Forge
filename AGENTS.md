@@ -65,6 +65,7 @@ xray_forge/
     probe.py             low-level DPI-resistant probes (TLS/WS/VLESS tunnel/DoH)
     scanner.py           DNS (DoH/UDP/system), geo lookup, CIDR sampling, jitter
     scan_session.py      resumable scan sessions (state, CSV/JSON, per-ISP)
+    sni_search.py        SNI/fronting-host search (candidates x clean IPs)
     subscription.py      subscription fetch + multi-format decode (b64/plain/
                          Clash YAML/sing-box JSON) + conversions back to URIs
     sub_source.py        subscription SOURCE manager (ETag cache, dedup, state)

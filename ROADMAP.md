@@ -104,7 +104,12 @@ pass latency checks while being unusable.
 - ✅ GUI: IP Finder runs named resumable sessions (shared state with the CLI
   under `~/.xray_forge/scans/`), with load/⟳, geo-tag toggle and CSV/JSON
   export buttons; results tree shows jitter + exit country.
-- ⬜ SNI / fronting-host search mode (probe candidate SNIs against clean IPs).
+- ✅ SNI / fronting-host search mode: probe candidate SNIs (built-in preset
+  list or custom) against clean IPs — fragmented TLS handshake + optional
+  plain-GET check per (ip, sni) pair. Resumable sessions under
+  `~/.xray_forge/sni_search/`, CSV/JSON export, `--from-scan` reuses alive
+  IPs of a saved scan session. CLI `xray_forge snisearch`; GUI "🎯 SNI
+  Search" tab with ⤴ from-results / presets / stop / copy ip+sni.
 
 ## Phase 5 — New cores and transports 🟡
 

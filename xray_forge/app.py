@@ -66,6 +66,7 @@ from xray_forge.ui.widgets import Tooltip, Switch
 from xray_forge.ui.tabs.converter_tab import build_rules, build_naming, build_override
 from xray_forge.ui.tabs.converter_tab import build as build_converter_pane
 from xray_forge.ui.tabs.editor_tab import build as build_editor
+from xray_forge.ui.tabs.snis_tab import build as build_snis
 from xray_forge.ui.tabs.tester_tab import build as build_tester
 from xray_forge.ui.tabs.xray_tab import build as build_xray_tab
 from xray_forge.ui.tabs.scanner_tab import build as build_scanner
@@ -149,6 +150,10 @@ class App(tk.Tk):
         self._sub_reports: list = []
         self._sub_stop = threading.Event()
         self._subs_checking = False
+        # sni search (candidate SNIs × clean IPs)
+        self._stop_snis = threading.Event()
+        self._snis_running = False
+        self._snis_search = None
         # editor (per-config field editor + raw JSON round-trip)
         self._editor_items: list[tuple[int, str, Outbound]] = []
         self._editor_sel: int | None = None
@@ -239,6 +244,16 @@ class App(tk.Tk):
         a.sub_thr_var = tk.BooleanVar(value=True)
         a.sub_status_var = tk.StringVar(value="idle")
         a.sub_prog_var = tk.StringVar(value="0/0")
+        # sni search (candidate SNIs × clean IPs)
+        a.snis_ips_var = tk.StringVar(value="")
+        a.snis_names_var = tk.StringVar(value="")
+        a.snis_port_var = tk.StringVar(value="443")
+        a.snis_workers_var = tk.StringVar(value="32")
+        a.snis_frag_var = tk.StringVar(value="5,94,1@2")
+        a.snis_session_var = tk.StringVar(value="")
+        a.snis_resume_var = tk.BooleanVar(value=False)
+        a.snis_http_var = tk.BooleanVar(value=True)
+        a.snis_prog_var = tk.StringVar(value="0/0")
         # counts / status
         a.msg_var = tk.StringVar(
             value="Paste configs on the left — conversion is live. "
@@ -305,6 +320,8 @@ class App(tk.Tk):
         nb.add(find_tab, text="  🌐 IP Finder  ")
         a.find_tab = find_tab
         build_scanner(a)
+
+        build_snis(a)  # adds the "🎯 SNI Search" notebook page (a.snis_tab)
 
         subs_tab = tk.Frame(container, background=BG)
         nb.add(subs_tab, text="  📥 Subscriptions  ")
@@ -445,6 +462,8 @@ class App(tk.Tk):
             "res_host_var", "scan_session_var", "scan_load_var",
             "core_var", "core_timeout_var",
             "fake_sni_var", "domain_front_var", "sub_core_var",
+            "snis_ips_var", "snis_names_var", "snis_port_var",
+            "snis_frag_var", "snis_session_var",
         ]
         bool_vars = [
             "fp_on", "cs_on", "fm_on", "rename_var", "tls_only_var",
@@ -452,11 +471,12 @@ class App(tk.Tk):
             "curl_var", "dedup_var", "show_best_var",
             "record_frag_var", "sni_case_var", "sub_thr_var",
             "scan_resume_var", "scan_geo_var",
+            "snis_resume_var", "snis_http_var",
         ]
         int_vars = ["start_var", "att_var", "workers_test_var",
                     "scan_count_var", "scan_workers_var",
                     "core_workers_var", "sub_workers_var", "sub_timeout_var",
-                    "sub_top_var"]
+                    "sub_top_var", "snis_workers_var"]
         for key in simple_vars:
             if hasattr(a, key):
                 try:
@@ -1595,6 +1615,160 @@ class App(tk.Tk):
                 pass
             a._scan_ex = None
 
+    # ------------------------------------------------------------------ sni search
+    # Phase 4: probe candidate SNI names against the clean IPs the IP Finder
+    # (or any saved scan session) produced.  Working pairs = (clean IP, SNI)
+    # combinations the local censorship box currently lets through.
+    def _snis_start(self) -> None:
+        a = self
+        if a._snis_running:
+            return
+        from xray_forge.core.sni_search import SniSearch
+        ips = SniSearch.parse_list(a.snis_ips_var.get())
+        snis = SniSearch.parse_list(a.snis_names_var.get())
+        if not ips or not snis:
+            a.msg_var.set("sni search: need clean ips AND candidate snis "
+                          "(try 'presets' / 'from results')")
+            return
+        try:
+            workers = int(a.snis_workers_var.get())
+        except Exception:
+            workers = 32
+        name = a.snis_session_var.get().strip()
+        if not name:
+            name = "sni_" + time.strftime("%Y%m%d_%H%M%S")
+            a.snis_session_var.set(name)
+        search = SniSearch(name)
+        pending = search.set_targets(ips, snis,
+                                     port=a.snis_port_var.get().strip()
+                                     or "443",
+                                     resume=a.snis_resume_var.get())
+        if not pending:
+            a.msg_var.set("sni search: session has no pending pairs — "
+                          "uncheck resume or pick a new name")
+            return
+        a._snis_search = search
+        a._snis_running = True
+        a._stop_snis.clear()
+        a.snis_prog_var.set(f"0/{pending}")
+        a.btn_stop_snis.configure(state="normal")
+        a.msg_var.set(f"sni search '{name}' — {pending} pair(s), "
+                      f"{len(ips)} ip × {len(snis)} sni")
+        threading.Thread(
+            target=a._snis_job,
+            args=(search, workers, pending),
+            daemon=True).start()
+
+    def _snis_job(self, search, workers: int, pending: int) -> None:
+        a = self
+        try:
+            search.run(port=search.port, workers=workers,
+                       frag=a.snis_frag_var.get() or "5,94,1@2",
+                       timeout=float(a.tmo_var.get() or "5"),
+                       http_check=a.snis_http_var.get(),
+                       stop=a._stop_snis,
+                       progress=lambda d, t: a.after(
+                           0, a._snis_progress, d, t))
+        except Exception as e:
+            a.after(0, lambda err=e: a.msg_var.set(f"sni search error: {err}"))
+        a.after(0, a._snis_finish, pending)
+
+    def _snis_progress(self, done: int, total: int) -> None:
+        a = self
+        a.snis_prog_var.set(f"{done}/{total}")
+        a.msg_var.set(f"sni searching … {done}/{total}")
+
+    def _snis_finish(self, pending: int) -> None:
+        a = self
+        a._snis_running = False
+        a.btn_stop_snis.configure(state="disabled")
+        s = a._snis_search
+        if s is not None:
+            a.snis_tree.delete(*a.snis_tree.get_children(""))
+            for h in s.hits():
+                a._snis_add_row(h)
+            good = len(s.hits())
+            a.msg_var.set(f"sni search '{s.name}' — {good}/{len(s.results)} "
+                          f"working · {len(s.pending)} pending · session "
+                          f"saved (resume to continue)")
+            a.snis_prog_var.set(f"{len(s.results)}/{pending}")
+
+    def _snis_add_row(self, h) -> None:
+        a = self
+        a.snis_tree.insert("", "end", values=(
+            h.ip, h.port, h.sni,
+            f"{h.tls_ms:.0f}" if h.tls_ms is not None else "—",
+            h.tls_ver or "",
+            "✓" if h.http_ok else ("—" if h.ok else ""),
+            (h.info or "")[:120]))
+
+    def _snis_from_results(self) -> None:
+        """Pull alive IPs from the IP Finder results tree."""
+        a = self
+        ips = []
+        for iid in a.res_tree.get_children(""):
+            ip = a.res_tree.set(iid, "ip").strip()
+            if ip and ip not in ips:
+                ips.append(ip)
+        if not ips:
+            a.msg_var.set("no scan results — run the IP Finder first")
+            return
+        have = a.snis_ips_var.get().strip()
+        merged = (have + " " if have else "") + " ".join(ips[:200])
+        a.snis_ips_var.set(merged)
+        a.msg_var.set(f"added {len(ips[:200])} ip(s) from the scan results")
+
+    def _snis_presets(self) -> None:
+        a = self
+        from xray_forge.core.sni_search import DEFAULT_SNI_CANDIDATES
+        have = a.snis_names_var.get().strip()
+        merged = (have + " " if have else "") + " ".join(DEFAULT_SNI_CANDIDATES)
+        a.snis_names_var.set(merged)
+        a.msg_var.set(f"added {len(DEFAULT_SNI_CANDIDATES)} preset SNIs")
+
+    def _snis_export_csv(self) -> None:
+        a = self
+        if a._snis_search is None or not a._snis_search.results:
+            a.msg_var.set("no sni search results to export")
+            return
+        path = filedialog.asksaveasfilename(
+            parent=a, defaultextension=".csv",
+            filetypes=[("CSV", "*.csv")], initialfile="sni_search.csv")
+        if not path:
+            return
+        a.msg_var.set("csv → " + a._snis_search.export_csv(path))
+
+    def _snis_export_json(self) -> None:
+        a = self
+        if a._snis_search is None or not a._snis_search.results:
+            a.msg_var.set("no sni search results to export")
+            return
+        path = filedialog.asksaveasfilename(
+            parent=a, defaultextension=".json",
+            filetypes=[("JSON", "*.json")], initialfile="sni_search.json")
+        if not path:
+            return
+        a.msg_var.set("json → " + a._snis_search.export_json(path))
+
+    def _snis_copy_pair(self, _event=None) -> None:
+        """Double-click a row → copy 'IP' and 'sni' hint to clipboard."""
+        a = self
+        iid = a.snis_tree.focus()
+        if not iid:
+            return
+        ip = a.snis_tree.set(iid, "ip")
+        sni = a.snis_tree.set(iid, "sni")
+        a.clipboard_clear()
+        a.clipboard_append(f"{ip}  sni={sni}")
+        a.msg_var.set("copied ip + sni — paste the IP into FORCE IP")
+
+    def _snis_clear(self) -> None:
+        a = self
+        a.snis_tree.delete(*a.snis_tree.get_children(""))
+        a._snis_search = None
+        a.snis_prog_var.set("0/0")
+        a.msg_var.set("sni search results cleared")
+
     def _do_geo(self, ip: str | None) -> None:
         a = self
         if ip is None:
@@ -1738,6 +1912,7 @@ class App(tk.Tk):
         a._stop_test.set()
         a._stop_scan.set()
         a._sub_stop.set()
+        a._stop_snis.set()
         try:
             save_settings(a._capture_settings())
         except Exception:

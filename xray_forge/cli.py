@@ -141,6 +141,50 @@ def cli_geo(ip: str | None) -> None:
     print(geo_lookup(ip or ""))
 
 
+def cli_snisearch(ips: str, snis: str, port: str, workers: int, frag_s: str,
+                  timeout: float, resume: str | None = None,
+                  from_scan: str | None = None, presets: bool = False,
+                  no_http: bool = False, csv_out: str | None = None,
+                  json_out: str | None = None) -> None:
+    """SNI / fronting-host search: candidate SNIs × clean IPs."""
+    from xray_forge.core.sni_search import SniSearch, DEFAULT_SNI_CANDIDATES, \
+        targets_from_scan
+    ip_list = SniSearch.parse_list(ips)
+    if from_scan:
+        scan_ips = targets_from_scan(from_scan)
+        print(f"from scan '{from_scan}': {len(scan_ips)} alive ip(s)")
+        ip_list = SniSearch.parse_list(ips + " " + " ".join(scan_ips))
+    sni_list = SniSearch.parse_list(snis)
+    if presets:
+        for cand in DEFAULT_SNI_CANDIDATES:
+            if cand not in sni_list:
+                sni_list.append(cand)
+    if not ip_list or not sni_list:
+        print("need --ips and --snis (or --from-scan / --presets)")
+        return
+    import time as _t
+    name = resume or f"sni_{_t.strftime('%Y%m%d_%H%M%S')}"
+    search = SniSearch(name)
+    n = search.set_targets(ip_list, sni_list, port=port, resume=bool(resume))
+    print(f"probing {n} (ip, sni) pair(s) · {len(ip_list)} ip × "
+          f"{len(sni_list)} sni …")
+    search.run(port=port, workers=workers, frag=frag_s, timeout=timeout,
+               http_check=not no_http,
+               progress=lambda d, t: print(f"\r{d}/{t}", end="", flush=True))
+    print()
+    good = search.hits()
+    for h in good[:20]:
+        http = " http✓" if h.http_ok else ""
+        print(f"ok: {h.ip}:{h.port} sni={h.sni} ms={h.tls_ms:.0f} "
+              f"{h.tls_ver}{http}")
+    print(f"sni search done — {len(good)}/{len(search.results)} working "
+          f"({len(search.pending)} pending)")
+    if csv_out:
+        print("csv →", search.export_csv(csv_out))
+    if json_out:
+        print("json →", search.export_json(json_out))
+
+
 def cli_mitm(out: str | None, cn: str, gen_cert: bool,
              groups: str, guide: bool) -> None:
     """Generate the MITM-DomainFronting Xray config (+ optional personal CA)."""
@@ -322,6 +366,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_scan.add_argument("--geo", action="store_true",
                         help="tag results with country/ISP")
 
+    p_sni = sub.add_parser("snisearch",
+                           help="probe candidate SNIs against clean IPs")
+    p_sni.add_argument("--ips", default="",
+                       help="comma/space separated clean IPs")
+    p_sni.add_argument("--snis", default="",
+                       help="comma/space separated candidate SNIs")
+    p_sni.add_argument("--presets", action="store_true",
+                       help="add the built-in SNI candidate list")
+    p_sni.add_argument("--from-scan", default=None, metavar="NAME",
+                       help="merge alive IPs of a saved scan session")
+    p_sni.add_argument("--port", default="443")
+    p_sni.add_argument("--workers", type=int, default=32)
+    p_sni.add_argument("--frag", default="5,94,1@2")
+    p_sni.add_argument("--timeout", type=float, default=5.0)
+    p_sni.add_argument("--no-http", action="store_true",
+                       help="skip the plain GET check after the handshake")
+    p_sni.add_argument("--resume", default=None, metavar="NAME",
+                       help="resume a named sni-search session")
+    p_sni.add_argument("--csv", default=None, metavar="FILE")
+    p_sni.add_argument("--json", default=None, dest="json_out", metavar="FILE")
+
     p_geo = sub.add_parser("geo", help="geo lookup")
     p_geo.add_argument("ip", nargs="?", default=None)
 
@@ -386,6 +451,12 @@ def main(argv: list[str] | None = None) -> int:
         cli_scan(args.cidr, args.count, args.sni, args.port,
                  args.workers, args.frag, resume=args.resume,
                  csv_out=args.csv, json_out=args.json_out, geo=args.geo)
+    elif cmd == "snisearch":
+        cli_snisearch(args.ips, args.snis, args.port, args.workers,
+                      args.frag, args.timeout, resume=args.resume,
+                      from_scan=args.from_scan, presets=args.presets,
+                      no_http=args.no_http, csv_out=args.csv,
+                      json_out=args.json_out)
     elif cmd == "geo":
         cli_geo(args.ip)
     elif cmd == "mitm":

@@ -213,6 +213,42 @@ def test_fmt_bps():
     assert _fmt_bps(s) == "1.4MB/s"
 
 
+# ---------------------------------------------------------------- sni search
+
+def test_snis_tab_and_presets(app):
+    texts = [app.nb.tab(t, "text") for t in app.nb.tabs()]
+    assert any("SNI Search" in t for t in texts)
+    app.snis_names_var.set("a.example")
+    app._snis_presets()
+    assert "a.example" in app.snis_names_var.get()
+    assert "www.speedtest.net" in app.snis_names_var.get()
+
+
+def test_snis_from_results_pulls_scan_ips(app):
+    from xray_forge.core.scan_session import ScanResult, ScanSession
+    s = ScanSession("guisnis")
+    s.results["203.0.113.9"] = ScanResult(ip="203.0.113.9", port="443",
+                                          alive=True, ms=12.0)
+    s.results["203.0.113.8"] = ScanResult(ip="203.0.113.8", port="443",
+                                          alive=True, ms=40.0)
+    s.save()
+    app.scan_load_var.set("guisnis")
+    app._scan_load_session()
+    app.snis_ips_var.set("")
+    app._snis_from_results()
+    ips = app.snis_ips_var.get().split()
+    assert "203.0.113.9" in ips and "203.0.113.8" in ips
+
+
+def test_snis_clear_and_settings(app):
+    app._snis_clear()
+    assert app.snis_prog_var.get() == "0/0"
+    s = app._capture_settings()
+    for key in ("snis_ips_var", "snis_names_var", "snis_port_var",
+                "snis_http_var", "snis_workers_var"):
+        assert key in s
+
+
 # ------------------------------------------------------------- scan sessions
 
 def test_scan_session_load_populates_tree(app):

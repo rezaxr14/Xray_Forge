@@ -34,6 +34,7 @@ Xray_Forge/
     │   ├── socks.py          # SOCKS5 client + HTTP-through-socks
     │   ├── scanner.py        # DNS resolution, GeoIP, CIDR sampling, jitter
     │   ├── scan_session.py   # Resumable scan sessions (CSV/JSON, per-ISP)
+    │   ├── sni_search.py    # SNI / fronting-host search (candidates × clean IPs)
     │   ├── subscription.py   # Sub fetch + multi-format decode (b64/Clash/sing-box)
     │   ├── sub_source.py     # Subscription source manager (ETag cache, dedup)
     │   ├── healthcheck.py    # Staged pipeline: dns→tcp→tls→request→throughput
@@ -82,9 +83,11 @@ pip install ".[mitm]"     # cryptography, for MITM-DomainFronting CA generation
 | Tab | Purpose |
 |-----|---------|
 | **⚙ Configs** | Paste raw configs → live-convert with fingerprint/cipher/fragment injection, renaming, and mass IP/port override |
+| **✎ Editor** | Per-config field editor (Reality pbk/sid/spx, XHTTP mode, flow) + raw-JSON round-trip |
 | **📡 Tester** | Fragmented TLS + WebSocket 101 + REAL delay through tunnel + exit-country detection |
 | **🧩 Xray Core** | Auto-detect/verify `xray.exe` (v2rayN, PATH, etc.) and test configs through the real engine via local SOCKS |
 | **🌐 IP Finder** | Geo lookup, anti-hijack DNS resolution (DoH + Iranian UDP + system), resumable CIDR scan sessions with CSV/JSON export |
+| **🎯 SNI Search** | Probe candidate SNIs (fronting hosts) against clean IPs — find the (ip, sni) pairs your network lets through |
 | **📥 Subscriptions** | Source manager (ETag cache) + staged health checks with scoring, technique tags, best-N subscription export |
 
 ## 📸 Screenshots
@@ -122,6 +125,10 @@ python -m xray_forge scan 104.16.0.0/13 --sni example.com --count 200 --geo \
        --csv scan.csv --json scan.json
 python -m xray_forge scan 104.16.0.0/13 --resume scan_20250101_120000
 
+# SNI / fronting-host search: candidate SNIs x clean IPs (from a scan session)
+python -m xray_forge snisearch --from-scan scan_20250101_120000 \
+       --presets --workers 32 --csv sni.csv --json sni.json
+
 # Geo-lookup an IP
 python -m xray_forge geo 1.1.1.1
 
@@ -148,6 +155,7 @@ python -m xray_forge subs check --core auto   # non-VLESS configs via a real cor
 | `export` | `--format clash\|singbox\|sub` |
 | `test` | `--timeout --frag --core` |
 | `scan` | `--count --sni --port --workers --frag --resume NAME --csv FILE --json FILE --geo` |
+| `snisearch` | `--ips --snis --presets --from-scan NAME --port --workers --frag --timeout --no-http --resume NAME --csv FILE --json FILE` |
 | `geo` | `IP` (empty = your own IP) |
 | `mitm` | `-o FILE --cn --gen-cert --groups google,meta,fastly --guide` |
 | `warp` | `register\|config\|scan-endpoints` · `--endpoint --count --workers` |

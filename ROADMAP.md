@@ -6,6 +6,45 @@ Tracking issue-style notes live here; implementation lives on `main`.
 
 ---
 
+## Sprint 0 — Correctness and security hardening ✅
+
+Found by reviewing `feat/roadmap-v2-1`; each item was reproduced first and
+ships with a regression test that fails on the old code.
+
+- ✅ Health check: Stop actually stops the pool; empty fragmentation variants
+  and core start failures become failed stages instead of crashes.
+- ✅ TLS: DoH and direct fetches verify certificates (CERT_REQUIRED, IP SANs,
+  certifi); direct HTTPS GET really sends its request; redirects and body
+  size are bounded.
+- ✅ Subscriptions: raw-text fetch, URL-safe base64, http(s) only, size cap;
+  a 200 with no configs keeps the cache and ETag.
+- ✅ Share links: lossless round trips (`extra_params`), `type` defaults to
+  `tcp`, `raw`/`splithttp` aliases, VLESS `encryption` preserved.
+- ✅ Cores: XHTTP/KCP are Xray-only; sing-box/Clash no longer export them as
+  plain TCP.
+- ✅ Throughput: upload POSTs >= 1 MiB and waits for the server; 2xx and
+  >= 90% body required; a fresh session per direction.
+- ✅ Secrets: WARP account, settings and MITM CA key are written 0600;
+  CA validity 1 year, optional name constraints.
+- ✅ Release workflow: signing secrets scoped to the signing step, `.sig`
+  names match the upload globs, tag must equal the package version.
+
+Still open from the review (next sprints):
+
+- ⬜ Split `app.py` (~1.2k lines) into per-tab modules; add structured logging.
+- ⬜ Async/pooled funnel for large scans; per-stage timeouts in settings.
+- ⬜ License decision (CC BY 4.0 is unusual for software) before the next
+  release.
+- ⬜ SNI-spoofing helper binary (separate process, raw sockets).
+- ⬜ MASQUE and Psiphon spikes: verify upstream core support first.
+- ⬜ Pin third-party Actions by commit SHA (needs a maintainer to look up
+  the SHAs).
+- ⬜ Validate the throughput probe against a live VLESS server;
+  `speed.cloudflare.com:80` may redirect, in which case the stage fails
+  loudly rather than reporting a speed.
+
+---
+
 ## Phase 0 — Foundation ✅
 
 Goal: a trustworthy base the rest of the plan can build on.

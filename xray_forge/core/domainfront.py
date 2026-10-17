@@ -252,11 +252,18 @@ def write_config(path: str, **overrides) -> str:
 # ===========================================================================
 
 def generate_ca(common_name: str, crt_path: str, key_path: str,
-                days: int = 3650) -> tuple[str, str]:
+                days: int = 365,
+                permitted_domains: list[str] | None = None) -> tuple[str, str]:
     """Generate a self-signed CA cert/key pair (needs the ``cryptography`` pkg).
 
     The cert is a CA with key usages Certificate Signing + CRL Signing, as
     required by the Instant-Certificate MITM technique.  Returns (crt, key).
+
+    The CA private key can mint a certificate for *any* site, so it is written
+    owner-only, valid for ``days`` (default one year) and -- when
+    ``permitted_domains`` is given -- name-constrained: even if the key leaks,
+    a trust store honouring RFC 5280 will only accept certificates for those
+    DNS names (and their subdomains).
     """
     try:
         from cryptography import x509
@@ -275,7 +282,7 @@ def generate_ca(common_name: str, crt_path: str, key_path: str,
         x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Xray Forge (personal)"),
     ])
     now = datetime.datetime.now(datetime.timezone.utc)
-    cert = (x509.CertificateBuilder()
+    builder = (x509.CertificateBuilder()
             .subject_name(subject).issuer_name(issuer)
             .public_key(key.public_key())
             .serial_number(x509.random_serial_number())
@@ -287,21 +294,26 @@ def generate_ca(common_name: str, crt_path: str, key_path: str,
                 digital_signature=True, key_cert_sign=True, crl_sign=True,
                 content_commitment=False, key_encipherment=False,
                 data_encipherment=False, key_agreement=False,
-                encipher_only=False, decipher_only=False), critical=True)
-            .sign(key, hashes.SHA256()))
-    with open(key_path, "wb") as f:
-        f.write(key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.TraditionalOpenSSL,
-            serialization.NoEncryption()))
-    with open(crt_path, "wb") as f:
-        f.write(cert.public_bytes(serialization.Encoding.PEM))
+                encipher_only=False, decipher_only=False), critical=True))
+    if permitted_domains:
+        builder = builder.add_extension(
+            x509.NameConstraints(
+                permitted_subtrees=[x509.DNSName(d.lstrip("*.")) for d in permitted_domains],
+                excluded_subtrees=None),
+            critical=True)
+    cert = builder.sign(key, hashes.SHA256())
+    from xray_forge.core.fsutil import write_private
+    write_private(key_path, key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.TraditionalOpenSSL,
+        serialization.NoEncryption()))
+    write_private(crt_path, cert.public_bytes(serialization.Encoding.PEM), mode=0o644)
     return crt_path, key_path
 
 
 def openssl_command(common_name: str = "Xray Forge MITM CA") -> str:
     """Equivalent openssl command for users without the cryptography pkg."""
-    return ("openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes "
+    return ("openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes "
             f'-subj "/CN={common_name}/O=Xray Forge (personal)" '
             '-addext "basicConstraints=critical,CA:TRUE" '
             '-addext "keyUsage=critical,keyCertSign,cRLSign,digitalSignature" '

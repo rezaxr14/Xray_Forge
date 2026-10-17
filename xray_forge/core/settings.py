@@ -47,7 +47,7 @@ def load_settings() -> dict[str, Any]:
 def save_settings(data: dict[str, Any]) -> None:
     path = settings_path()
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        from xray_forge.core.fsutil import write_private
+        write_private(path, json.dumps(data, indent=2, ensure_ascii=False))
     except OSError:
         pass  # best-effort persistence

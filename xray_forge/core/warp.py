@@ -189,9 +189,9 @@ def _account_path() -> str:
 
 def save_account(acct: WarpAccount) -> str:
     path = _account_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(acct.to_dict(), f, indent=2)
+    from xray_forge.core.fsutil import write_private
+    # holds the WARP private key and device token -> owner-only
+    write_private(path, json.dumps(acct.to_dict(), indent=2))
     return path
 
 

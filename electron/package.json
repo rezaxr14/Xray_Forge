@@ -1,0 +1,15 @@
+{
+  "name": "xray-forge-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron front end for the Xray Forge Python engine",
+  "main": "main.js",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}

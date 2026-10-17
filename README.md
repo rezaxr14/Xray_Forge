@@ -265,3 +265,17 @@ See [`LICENSE`](LICENSE) for the full legal text.
 ## ⚠️ Disclaimer
 
 This tool is for educational and network-diagnostic purposes. Users are responsible for complying with their local laws and regulations regarding proxy/circumvention software. The authors are not responsible for any misuse.
+
+## Electron UI (preview)
+
+The new front end lives in `electron/` and drives the Python engine over
+stdio (`python -m xray_forge serve`, protocol in `docs/engine-api.md`).
+
+```bash
+cd electron
+npm install
+npm start          # needs python3 with this package's requirements on PATH
+npm test           # Playwright e2e (npm i --no-save playwright first)
+```
+
+Set `XRAY_FORGE_PYTHON` to use a specific interpreter.

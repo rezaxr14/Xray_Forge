@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Xray Forge</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Xray Forge</h1>
+    <nav role="tablist">
+      <button role="tab" data-tab="configs" aria-selected="true">Configs</button>
+      <button role="tab" data-tab="convert" aria-selected="false">Convert</button>
+      <button role="tab" data-tab="health" aria-selected="false">Health check</button>
+      <button role="tab" data-tab="subs" aria-selected="false">Subscriptions</button>
+    </nav>
+    <span id="engine-status" class="muted" aria-live="polite">engine: connecting…</span>
+  </header>
+
+  <main>
+    <!-- Configs -->
+    <section id="tab-configs" class="tab" role="tabpanel">
+      <div class="row">
+        <textarea id="cfg-input" rows="6" spellcheck="false"
+          placeholder="Paste share links (vless:// vmess:// trojan:// ss:// hy2:// tuic:// wireguard://), one per line"></textarea>
+        <div class="col">
+          <button id="cfg-parse" class="primary">Parse</button>
+          <button id="cfg-dedup">Remove duplicates</button>
+          <button id="cfg-clear">Clear</button>
+          <span id="cfg-count" class="muted">0 configs</span>
+        </div>
+      </div>
+      <div class="split">
+        <div class="table-wrap">
+          <table id="cfg-table">
+            <thead><tr><th>#</th><th>Name</th><th>Scheme</th><th>Endpoint</th><th>Transport</th><th>Security</th><th>Cores</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <aside id="editor" hidden>
+          <h2>Edit config</h2>
+          <form id="ed-form" autocomplete="off"></form>
+          <div class="row">
+            <button id="ed-apply" class="primary" type="button">Apply</button>
+            <span id="ed-msg" class="muted" role="status"></span>
+          </div>
+          <label>Share link <textarea id="ed-uri" rows="4" readonly spellcheck="false"></textarea></label>
+        </aside>
+      </div>
+      <div class="row">
+        <label>Export
+          <select id="export-format">
+            <option value="clash">Clash / Mihomo</option>
+            <option value="singbox">sing-box</option>
+            <option value="sub">Subscription (base64)</option>
+          </select>
+        </label>
+        <button id="export-run">Export</button>
+      </div>
+      <textarea id="export-out" rows="6" readonly spellcheck="false" placeholder="Export output appears here"></textarea>
+    </section>
+
+    <!-- Convert -->
+    <section id="tab-convert" class="tab" role="tabpanel" hidden>
+      <textarea id="cv-input" rows="8" spellcheck="false" placeholder="Paste links to fix (fingerprint, fragment, naming)"></textarea>
+      <div class="row">
+        <label>Name template <input id="cv-template" type="text" size="28"></label>
+        <label><input id="cv-dedup" type="checkbox" checked> Remove duplicates</label>
+        <button id="cv-run" class="primary">Convert</button>
+        <span id="cv-msg" class="muted" role="status"></span>
+      </div>
+      <textarea id="cv-output" rows="8" readonly spellcheck="false"></textarea>
+      <div class="row"><button id="cv-send">Send to Configs</button></div>
+    </section>
+
+    <!-- Health -->
+    <section id="tab-health" class="tab" role="tabpanel" hidden>
+      <div class="row">
+        <label>Workers <input id="hc-workers" type="number" min="1" max="64" value="8"></label>
+        <label>Timeout (s) <input id="hc-timeout" type="number" min="1" max="60" value="6"></label>
+        <label>Core
+          <select id="hc-core"><option value="">native only</option><option value="auto">auto</option></select>
+        </label>
+        <label><input id="hc-throughput" type="checkbox" checked> Throughput</label>
+        <button id="hc-start" class="primary">Run on configs</button>
+        <button id="hc-cancel" disabled>Cancel</button>
+        <button id="hc-keep" disabled>Keep passing → Configs</button>
+      </div>
+      <div class="row">
+        <progress id="hc-progress" value="0" max="1"></progress>
+        <span id="hc-status" class="muted" role="status">idle</span>
+      </div>
+      <div class="table-wrap">
+        <table id="hc-table">
+          <thead><tr><th>Score</th><th>Name</th><th>Scheme</th><th>Stages</th><th>Techniques</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Subscriptions -->
+    <section id="tab-subs" class="tab" role="tabpanel" hidden>
+      <div class="row">
+        <input id="sub-url" type="url" size="52" placeholder="https://… subscription URL">
+        <input id="sub-name" type="text" size="16" placeholder="name (optional)">
+        <button id="sub-add" class="primary">Add</button>
+        <button id="sub-fetch">Fetch enabled</button>
+        <button id="sub-load">Load into Configs</button>
+        <span id="sub-msg" class="muted" role="status"></span>
+      </div>
+      <div class="table-wrap">
+        <table id="sub-table">
+          <thead><tr><th>On</th><th>Name</th><th>URL</th><th>Configs</th><th>Status</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

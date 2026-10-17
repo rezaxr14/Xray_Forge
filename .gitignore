@@ -87,3 +87,7 @@ settings.json
 
 # Xray Forge specific
 xray.log
+
+# Electron UI
+node_modules/
+electron/out/

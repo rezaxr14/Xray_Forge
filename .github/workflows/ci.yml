@@ -100,3 +100,45 @@ jobs:
           else
             python "$RUNNER_TEMP/gui_smoke.py"
           fi
+
+  ui:
+    name: Electron UI (e2e)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install engine dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright (Electron itself is not needed for the e2e tests)
+        working-directory: electron
+        run: |
+          npm install --no-save --no-package-lock playwright@1.56.0
+          npx playwright install --with-deps chromium
+
+      - name: Syntax check
+        working-directory: electron
+        run: |
+          for f in main.js preload.js engine-client.js renderer/app.js; do node --check "$f"; done
+
+      - name: End-to-end tests (renderer + real engine)
+        working-directory: electron
+        env:
+          XRAY_FORGE_PYTHON: python
+        run: npm test

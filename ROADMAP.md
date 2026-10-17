@@ -31,7 +31,7 @@ ships with a regression test that fails on the old code.
 
 Still open from the review (next sprints):
 
-- ⬜ Split `app.py` (~1.9k lines) into per-tab modules.
+- ⬜ ~~Split `app.py`~~ — superseded by Phase 7 (Tk GUI will be retired).
 - ⬜ Async/pooled funnel for large scans; per-stage timeouts in settings.
 - ⬜ License decision (CC BY 4.0 is unusual for software) before the next
   release.
@@ -46,6 +46,27 @@ Still open from the review (next sprints):
 - ⬜ Validate the throughput probe against a live VLESS server;
   `speed.cloudflare.com:80` may redirect, in which case the stage fails
   loudly rather than reporting a speed.
+
+---
+
+## Phase 7 — Electron UI 🟡
+
+Decision: keep the Python `core/` as the engine and replace Tk with an
+Electron front end that talks to it over JSON-RPC on stdio (no network port).
+See `docs/engine-api.md`.
+
+- ✅ Step 1: engine API (`xray-forge serve`): parse/render/convert/export/
+  dedup, subscription sources, streamed + cancellable health-check jobs.
+- ✅ Step 2: `electron/` shell (contextIsolation, sandbox, CSP, no
+  innerHTML) with Configs (+ editor, export), Convert, Health check and
+  Subscriptions tabs. Playwright e2e tests drive the real renderer against
+  the real engine (`cd electron && npm test`; CI job `ui`).
+  Not covered by tests: the ~40-line `main.js`/`preload.js` glue (needs the
+  Electron binary).
+- ⬜ Step 3: Scanner, SNI search, WARP and MITM tabs (+ engine methods).
+- ⬜ Step 4: packaging (PyInstaller engine + electron-builder) and release
+  workflow.
+- ⬜ Step 5: retire the Tk GUI once the Electron app has feature parity.
 
 ---
 

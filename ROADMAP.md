@@ -31,12 +31,16 @@ ships with a regression test that fails on the old code.
 
 Still open from the review (next sprints):
 
-- ⬜ Split `app.py` (~1.2k lines) into per-tab modules; add structured logging.
+- ⬜ Split `app.py` (~1.9k lines) into per-tab modules.
 - ⬜ Async/pooled funnel for large scans; per-stage timeouts in settings.
 - ⬜ License decision (CC BY 4.0 is unusual for software) before the next
   release.
 - ⬜ SNI-spoofing helper binary (separate process, raw sockets).
-- ⬜ MASQUE and Psiphon spikes: verify upstream core support first.
+- 🟡 MASQUE and Psiphon spikes: findings in `docs/spikes-masque-psiphon.md`
+  (MASQUE only confirmed in the `sing-box-extended` fork; Psiphon needs the
+  official build/config values). No adapter until a core is pinned.
+- ✅ Structured logging (`core/log.py`, CLI `-v`, GUI log file); silent
+  state-corruption resets now log a warning.
 - ⬜ Pin third-party Actions by commit SHA (needs a maintainer to look up
   the SHAs).
 - ⬜ Validate the throughput probe against a live VLESS server;

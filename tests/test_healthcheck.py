@@ -55,6 +55,9 @@ def wired(monkeypatch):
     monkeypatch.setattr(hc, "tunnel_http_get",
                         lambda tun, host, path, timeout, stop, **kw: (
                             120.0, "HTTP/1.1 200 OK", b"x" * 262144))
+    monkeypatch.setattr(hc, "tunnel_http_post",
+                        lambda tun, host, path, nbytes, timeout, stop: (
+                            200.0, "HTTP/1.1 200 OK", b""))
     # socks throughput
     monkeypatch.setattr(hc, "fetch_via_socks",
                         lambda ip, port, host, p, path, timeout=8.0,

@@ -366,6 +366,16 @@ def tcp_ping(host: str, port: str, timeout: float = 3.0, attempts: int = 2,
     return best
 
 
+def _xor_mask(payload: bytes, mask: bytes) -> bytes:
+    """RFC 6455 payload masking, without a per-byte Python loop."""
+    n = len(payload)
+    if n == 0:
+        return b""
+    key = (mask * (n // 4 + 1))[:n]
+    return (int.from_bytes(payload, "little")
+            ^ int.from_bytes(key, "little")).to_bytes(n, "little")
+
+
 def ws_frame(opcode: int, payload: bytes) -> bytes:
     mask = os.urandom(4)
     head = bytes([0x80 | opcode])
@@ -376,8 +386,7 @@ def ws_frame(opcode: int, payload: bytes) -> bytes:
         head += bytes([0x80 | 126]) + n.to_bytes(2, "big")
     else:
         head += bytes([0x80 | 127]) + n.to_bytes(8, "big")
-    masked = bytes(b ^ mask[i & 3] for i, b in enumerate(payload))
-    return head + mask + masked
+    return head + mask + _xor_mask(payload, mask)
 
 
 def ws_send(stream: TLSClient, payload: bytes, opcode: int = 0x2) -> None:
@@ -577,6 +586,37 @@ def tunnel_http_get(tun: "VlessTunnel", host: str, path: str,
            f"Connection: close\r\n\r\n").encode()
     t0 = time.perf_counter()
     tun.send(req)
+    raw = _read_http(tun.recv, deadline, stop)
+    ms = (time.perf_counter() - t0) * 1000
+    return ms, raw["status"], raw["body"]
+
+
+UPLOAD_CHUNK = 16384
+
+
+def tunnel_http_post(tun: "VlessTunnel", host: str, path: str, nbytes: int,
+                     timeout: float, stop: threading.Event | None):
+    """POST ``nbytes`` through ``tun`` and wait for the server's response.
+
+    Returns (ms, status_line, body).  The clock covers the whole exchange
+    (first byte sent -> response read), so a link that throttles or drops
+    uploads shows up as a slow or failed stage instead of "bytes handed to
+    the local socket buffer".
+    """
+    deadline = time.perf_counter() + timeout
+    head = (f"POST {path} HTTP/1.1\r\nHost: {host}\r\n"
+            f"User-Agent: {_random_ua()}\r\n"
+            f"Content-Type: application/octet-stream\r\n"
+            f"Content-Length: {nbytes}\r\nConnection: close\r\n\r\n").encode()
+    chunk = b"x" * UPLOAD_CHUNK
+    t0 = time.perf_counter()
+    tun.send(head)
+    sent = 0
+    while sent < nbytes:
+        _check(stop, deadline)
+        n = min(UPLOAD_CHUNK, nbytes - sent)
+        tun.send(chunk[:n])
+        sent += n
     raw = _read_http(tun.recv, deadline, stop)
     ms = (time.perf_counter() - t0) * 1000
     return ms, raw["status"], raw["body"]

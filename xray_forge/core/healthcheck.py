@@ -31,7 +31,7 @@ from xray_forge.core.models import Outbound
 from xray_forge.core.parser import parse_target
 from xray_forge.core.probe import (
     ProbeError, tcp_ping, tls_connect, parse_frag, ws_upgrade,
-    VlessTunnel, tunnel_http_get,
+    VlessTunnel, tunnel_http_get, tunnel_http_post,
 )
 from xray_forge.core.cores.base import running_core
 from xray_forge.core.socks import fetch_via_socks
@@ -41,6 +41,11 @@ WEIGHTS = {"dns": 5, "tcp": 10, "tls": 20, "request": 30,
            "download": 20, "upload": 15}
 DEFAULT_FRAG_VARIANTS = ("off", "5,94,1@2", "rand:1-16@2")
 DEFAULT_TARGET = ("speed.cloudflare.com", 80, "/__down?bytes=524288")
+DEFAULT_DOWNLOAD_BYTES = 262144
+# Upload throttling kicks in after a burst, so the payload must be big enough
+# to outlast socket buffers: 64 KiB measured nothing but the local send buffer.
+DEFAULT_UPLOAD_BYTES = 1024 * 1024
+MIN_FILL = 0.9      # a download that returns <90% of the bytes asked is a failure
 # Request target for core-backed checks (also yields exit IP + country)
 SOCKS_REQUEST_TARGET = ("ip-api.com", 80,
                         "/json?fields=status,countryCode,country,city,isp,query")
@@ -204,32 +209,74 @@ def _core_context(out: Outbound, core: str | None,
     return None
 
 
+def _http_ok(status: str) -> bool:
+    parts = (status or "").split(" ", 2)
+    return len(parts) > 1 and parts[1].startswith("2")
+
+
+def native_tunnel_factory(out: Outbound, variant: str = "", timeout: float = 6.0,
+                          stop=None):
+    """Return ``make()`` -> (VlessTunnel, socket): a *fresh* TLS + WebSocket +
+    VLESS session to the throughput target.
+
+    One WebSocket carries exactly one VLESS connection (header sent once), so
+    every throughput direction needs its own session -- reusing the one the
+    request stage already used corrupts the stream.
+    """
+    host, port, _ = DEFAULT_TARGET
+
+    def make():
+        tc, sock, _info = tls_connect(out.host, out.port, sni=out.effective_sni,
+                                      frag=parse_frag(variant) if variant else None,
+                                      timeout=timeout, stop=stop)
+        try:
+            line, _ms = ws_upgrade(tc, out.host_header, out.path, timeout, stop)
+            if "101" not in line:
+                raise ProbeError("ws", line[:40] or "no upgrade")
+            return VlessTunnel(tc, out.credential, host, port, stop), sock
+        except Exception:
+            try:
+                sock.close()
+            except Exception:
+                pass
+            raise
+    return make
+
+
 def probe_throughput(out: Outbound, tc, sock, direction: str = "download",
-                     bytes_count: int = 262144, timeout: float = 15.0,
-                     stop=None, socks_port: int | None = None) -> StageResult:
-    """Measure download or upload through the tunnel (native or via socks)."""
+                     bytes_count: int | None = None, timeout: float = 15.0,
+                     stop=None, socks_port: int | None = None,
+                     tunnel_factory=None) -> StageResult:
+    """Measure download or upload through the tunnel (native or via socks).
+
+    A stage only passes when the server answered 2xx *and* (download) returned
+    at least ``MIN_FILL`` of the requested bytes.  ``tunnel_factory`` (see
+    :func:`native_tunnel_factory`) supplies a fresh native session; without it
+    the already-upgraded ``tc`` is used (valid for ONE direction only).
+    """
     host, port, path = DEFAULT_TARGET
+    if bytes_count is None:
+        bytes_count = (DEFAULT_DOWNLOAD_BYTES if direction == "download"
+                       else DEFAULT_UPLOAD_BYTES)
     if direction == "download":
         path = f"/__down?bytes={bytes_count}"
-    if tc is not None and out.scheme == "vless" and out.transport == "ws":
-        try:
-            tun = VlessTunnel(tc, out.credential, host, port, stop)
+    native = out.scheme == "vless" and out.transport == "ws" and \
+        (tc is not None or tunnel_factory is not None)
+    extra_sock = None
+    try:
+        if native:
+            if tunnel_factory is not None:
+                tun, extra_sock = tunnel_factory()
+            else:
+                tun = VlessTunnel(tc, out.credential, host, port, stop)
             if direction == "download":
                 ms, status, body = tunnel_http_get(tun, host, path, timeout, stop)
                 got = len(body)
             else:
-                req = (f"POST /__up HTTP/1.1\r\nHost: {host}\r\n"
-                       f"Content-Length: {bytes_count}\r\n"
-                       f"Connection: close\r\n\r\n").encode() + b"x" * bytes_count
-                t0 = time.perf_counter()
-                tun.send(req)
+                ms, status, body = tunnel_http_post(tun, host, "/__up",
+                                                    bytes_count, timeout, stop)
                 got = bytes_count
-                ms = (time.perf_counter() - t0) * 1000
-                status = "sent"
-        except ProbeError as pe:
-            return StageResult(direction, False, detail=f"{pe.stage}: {pe.detail[:40]}")
-    elif socks_port is not None:
-        try:
+        elif socks_port is not None:
             if direction == "download":
                 ms, status, body = fetch_via_socks("127.0.0.1", socks_port, host,
                                                    port, path, timeout=timeout)
@@ -239,10 +286,24 @@ def probe_throughput(out: Outbound, tc, sock, direction: str = "download",
                     "127.0.0.1", socks_port, host, port, "/__up",
                     timeout=timeout, method="POST", body=b"x" * bytes_count)
                 got = bytes_count
-        except Exception as e:
-            return StageResult(direction, False, detail=str(e)[:60])
-    else:
-        return StageResult(direction, False, detail="no transport available")
+        else:
+            return StageResult(direction, False, detail="no transport available")
+    except ProbeError as pe:
+        return StageResult(direction, False, detail=f"{pe.stage}: {pe.detail[:40]}")
+    except Exception as e:
+        return StageResult(direction, False, detail=str(e)[:60])
+    finally:
+        if extra_sock is not None:
+            try:
+                extra_sock.close()
+            except Exception:
+                pass
+    if not _http_ok(status):
+        return StageResult(direction, False, ms=ms,
+                           detail=(status or "no response")[:40])
+    if direction == "download" and got < bytes_count * MIN_FILL:
+        return StageResult(direction, False, ms=ms,
+                           detail=f"short body {got}/{bytes_count} bytes")
     if got == 0:
         return StageResult(direction, False, detail="0 bytes")
     bps = got / max(0.001, ms / 1000.0)
@@ -280,7 +341,7 @@ def run_health_check(line: str,
                      timeout: float = 6.0,
                      stop=None,
                      socks_port: int | None = None,
-                     upload_bytes: int = 65536,
+                     upload_bytes: int = DEFAULT_UPLOAD_BYTES,
                      core: str | None = None,
                      core_binary: str | None = None) -> HealthReport:
     """Run the full staged pipeline for one share-link.
@@ -325,13 +386,20 @@ def run_health_check(line: str,
                         req_res = sres
                 rep.stages.append(req_res)
                 if do_throughput and req_res.ok:
+                    factory = None
+                    if out.scheme == "vless" and out.transport == "ws":
+                        factory = native_tunnel_factory(
+                            out, tls_res.data.get("variant", ""), timeout, stop)
+                    # download uses the session the request stage upgraded;
+                    # upload gets its own fresh one (one VLESS conn per WS)
                     rep.stages.append(probe_throughput(out, tc, sock, "download",
                                                        timeout=timeout, stop=stop,
                                                        socks_port=socks))
                     rep.stages.append(probe_throughput(out, tc, sock, "upload",
                                                        bytes_count=upload_bytes,
                                                        timeout=timeout, stop=stop,
-                                                       socks_port=socks))
+                                                       socks_port=socks,
+                                                       tunnel_factory=factory))
         try:
             if sock is not None:
                 sock.close()

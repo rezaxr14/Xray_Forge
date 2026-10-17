@@ -13,12 +13,6 @@ jobs:
     name: Build ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    env:
-      # Signing is optional: configure repo secrets GPG_PRIVATE_KEY
-      # (optionally GPG_PASSPHRASE) and the checksums get detached
-      # signatures attached to the release.
-      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
     strategy:
       fail-fast: false
       matrix:
@@ -42,6 +36,18 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements.txt
+
+      - name: Check tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          pkg=$(python -c "import re,pathlib;print(re.search(r'__version__\s*=\s*\"([^\"]+)\"', pathlib.Path('xray_forge/__init__.py').read_text()).group(1))")
+          proj=$(python -c "import re,pathlib;print(re.search(r'(?m)^version\s*=\s*\"([^\"]+)\"', pathlib.Path('pyproject.toml').read_text()).group(1))")
+          tag="${GITHUB_REF_NAME#v}"
+          echo "tag=$tag package=$pkg pyproject=$proj"
+          if [ "$tag" != "$pkg" ] || [ "$tag" != "$proj" ]; then
+            echo "::error::tag v$tag does not match xray_forge.__version__ ($pkg) / pyproject ($proj)"
+            exit 1
+          fi
 
       - name: Install build deps
         run: |
@@ -83,17 +89,27 @@ jobs:
           sha256sum ${{ matrix.artifact }}.zip > ${{ matrix.artifact }}.zip.sha256
           cat ${{ matrix.artifact }}.zip.sha256
 
+      # Signing is optional: configure repo secrets GPG_PRIVATE_KEY (and
+      # optionally GPG_PASSPHRASE). The secrets are exposed to this step only,
+      # never to pip / pyinstaller / the test suite that run earlier.
       - name: Sign checksums (GPG, optional)
-        if: env.GPG_PRIVATE_KEY != ''
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
+          if [ -z "$GPG_PRIVATE_KEY" ]; then
+            echo "no GPG_PRIVATE_KEY secret configured; skipping signing"
+            exit 0
+          fi
           cd dist
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
           for f in ./*.sha256; do
             if [ -n "$GPG_PASSPHRASE" ]; then
               echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
-                --pinentry-mode loopback --detach-sign --armor "$f"
+                --pinentry-mode loopback --detach-sign --armor \
+                --output "$f.sig" "$f"
             else
-              gpg --batch --yes --detach-sign --armor "$f"
+              gpg --batch --yes --detach-sign --armor --output "$f.sig" "$f"
             fi
             echo "signed: $f"
           done

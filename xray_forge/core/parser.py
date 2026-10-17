@@ -487,8 +487,24 @@ def _transport_fields(t: Outbound) -> dict[str, Any]:
     return fields
 
 
+# Transports only Xray-core can run.  Rendering them for sing-box / Clash as
+# plain TCP would silently produce a *different*, non-working proxy, so the
+# exporters refuse (return None) and the cores report them as unsupported.
+XRAY_ONLY_TRANSPORTS = frozenset({"xhttp", "kcp", "mkcp"})
+
+
+def needs_xray(t: Outbound) -> bool:
+    return (t.scheme in ("vless", "vmess", "trojan")
+            and (t.transport or "").lower() in XRAY_ONLY_TRANSPORTS)
+
+
 def out_to_clash(t: Outbound) -> dict[str, Any] | None:
-    """One Clash Meta (Mihomo) proxy mapping from an Outbound."""
+    """One Clash Meta (Mihomo) proxy mapping from an Outbound.
+
+    Returns None for transports Mihomo export does not implement (xhttp...).
+    """
+    if needs_xray(t):
+        return None
     px: dict[str, Any] = {
         "name": t.name,
         "type": {"hysteria2": "hysteria2", "tuic": "tuic",
@@ -574,7 +590,12 @@ def out_to_clash(t: Outbound) -> dict[str, Any] | None:
 
 
 def out_to_singbox(t: Outbound) -> dict[str, Any] | None:
-    """One sing-box outbound mapping from an Outbound."""
+    """One sing-box outbound mapping from an Outbound.
+
+    Returns None for Xray-only transports (xhttp, kcp).
+    """
+    if needs_xray(t):
+        return None
     ob: dict[str, Any] = {
         "tag": t.name,
         "type": t.scheme,

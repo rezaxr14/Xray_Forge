@@ -47,7 +47,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov ruff
+          pip install pytest pytest-cov ruff cryptography
 
       - name: Compile check
         run: python -m compileall -q xray_forge Xray_Forge.py

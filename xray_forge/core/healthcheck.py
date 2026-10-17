@@ -21,6 +21,7 @@ Scoring is 0-100 with stage weights; :func:`rank_reports` sorts by score and
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -115,12 +116,14 @@ def probe_tcp(host: str, port: str, timeout: float = 5.0) -> StageResult:
 
 def probe_tls(out: Outbound, frag_variants: tuple[str, ...] = DEFAULT_FRAG_VARIANTS,
               timeout: float = 6.0, stop=None):
-    """Try TLS with each fragmentation variant. Returns (StageResult, session).
+    """Try TLS with each fragmentation variant.
 
-    ``session`` is the (TLSClient, socket) pair on success (caller closes), or
-    ``(None, None)``.
+    Returns ``(StageResult, (TLSClient, socket), technique_tag)``.  The session
+    pair is ``(None, None)`` and the tag ``""`` when every variant failed; on
+    success the caller owns (and must close) the socket.
     """
     sni = out.effective_sni
+    last = StageResult("tls", False, detail="no fragmentation variants to try")
     for variant in frag_variants:
         frag = parse_frag(variant)
         try:
@@ -308,9 +311,13 @@ def run_health_check(line: str,
         if tls_res.ok:
             core_ctx = _core_context(out, core, core_binary)
             socks = socks_port
-            try:
+            with contextlib.ExitStack() as stack:
                 if core_ctx is not None:
-                    socks = core_ctx.__enter__()
+                    try:
+                        socks = stack.enter_context(core_ctx)
+                    except Exception as e:  # core missing / died on start
+                        rep.stages.append(StageResult(
+                            "core", False, detail=str(e)[:60] or type(e).__name__))
                 req_res = probe_request(out, tc, sock, timeout=timeout, stop=stop)
                 if not req_res.ok and socks is not None:
                     sres = probe_request_socks(socks, timeout=timeout, stop=stop)
@@ -325,9 +332,6 @@ def run_health_check(line: str,
                                                        bytes_count=upload_bytes,
                                                        timeout=timeout, stop=stop,
                                                        socks_port=socks))
-            finally:
-                if core_ctx is not None:
-                    core_ctx.__exit__(None, None, None)
         try:
             if sock is not None:
                 sock.close()
@@ -346,7 +350,10 @@ def run_health_checks(lines: list[str], workers: int = 8, progress=None,
     still finish, bounded by their timeouts).
     """
     reports: list[HealthReport] = []
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
+    if stop is not None:
+        kwargs.setdefault("stop", stop)   # let in-flight probes abort too
+    ex = ThreadPoolExecutor(max_workers=max(1, workers))
+    try:
         futs = {ex.submit(run_health_check, line, **kwargs): line for line in lines}
         done = 0
         for fut in as_completed(futs):
@@ -361,6 +368,11 @@ def run_health_checks(lines: list[str], workers: int = 8, progress=None,
             done += 1
             if progress:
                 progress(done, len(futs))
+    finally:
+        # Leaving a plain ``with`` block would wait for every *queued* probe
+        # (minutes for big lists) even after the user pressed stop.
+        ex.shutdown(wait=True,
+                    cancel_futures=bool(stop is not None and stop.is_set()))
     return reports
 
 

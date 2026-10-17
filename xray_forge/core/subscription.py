@@ -16,12 +16,22 @@ from __future__ import annotations
 import base64
 import json
 import re
+from urllib.parse import urlsplit
 
-from xray_forge.core.probe import direct_get_json, ProbeError
+from xray_forge.core.probe import direct_get_text, ProbeError
 from xray_forge.core.models import Outbound
 from xray_forge.core.protocols import handler_for
 
 JSON_SUFFIX = ".json"
+MAX_SUB_BYTES = 8 * 1024 * 1024        # refuse absurdly large "subscriptions"
+_B64_RE = re.compile(r"[A-Za-z0-9+/_-]+={0,2}")   # standard *and* URL-safe
+
+
+def _b64_to_text(compact: str) -> str:
+    """Decode standard or URL-safe base64 (padded or not). Raises ValueError."""
+    std = compact.replace("-", "+").replace("_", "/")
+    std += "=" * (-len(std) % 4)
+    return base64.b64decode(std, validate=True).decode("utf-8", "replace")
 
 
 def is_base64_config(text: str) -> bool:
@@ -33,13 +43,12 @@ def is_base64_config(text: str) -> bool:
     compact = re.sub(r"\s+", "", stripped)
     if len(compact) < 16:
         return False
-    # Must be valid base64 alphabet
-    if not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", compact):
+    # Must be valid base64 alphabet (URL-safe variant included)
+    if not _B64_RE.fullmatch(compact):
         return False
     # Try decode — if it yields proxy:// URIs, treat as base64 sub
     try:
-        padded = compact + "=" * (-len(compact) % 4)
-        decoded = base64.b64decode(padded, validate=True).decode("utf-8", "replace")
+        decoded = _b64_to_text(compact)
     except Exception:
         return False
     return any(
@@ -55,9 +64,8 @@ def decode_subscription(text: str) -> list[str]:
         return []
     if is_base64_config(text):
         compact = re.sub(r"\s+", "", text)
-        padded = compact + "=" * (-len(compact) % 4)
         try:
-            decoded = base64.b64decode(padded, validate=True).decode("utf-8", "replace")
+            decoded = _b64_to_text(compact)
         except Exception:
             decoded = text
     else:
@@ -322,19 +330,36 @@ def text_to_lines(text: str) -> list[str]:
     return decode_subscription(text)
 
 
-def fetch_subscription(url: str, timeout: float = 10.0) -> list[str]:
-    """Fetch a subscription URL and return decoded config lines (any format)."""
+def _urllib_get(url: str, timeout: float, max_bytes: int) -> str:
+    """Plain (certificate-verifying) fallback fetch with a size cap."""
+    import urllib.request
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "xray-forge/2.1-subscriber"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        data = r.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise ProbeError("sub", f"subscription larger than {max_bytes} bytes")
+    return data.decode("utf-8", "replace")
+
+
+def fetch_subscription(url: str, timeout: float = 10.0,
+                       max_bytes: int = MAX_SUB_BYTES) -> list[str]:
+    """Fetch a subscription URL and return decoded config lines (any format).
+
+    http/https only.  The DPI-resistant direct path (fragmented hello, DoH,
+    verified certificate) is tried first, then a plain verified urllib fetch.
+    """
+    if urlsplit(url).scheme.lower() not in ("http", "https"):
+        raise ProbeError("sub", "subscription URLs must be http or https")
     try:
-        # Try anti-DPI direct fetch first
-        data = direct_get_json(url, timeout=timeout)
-        text = data if isinstance(data, str) else str(data)
-    except Exception:
+        text = direct_get_text(url, timeout=timeout, max_bytes=max_bytes)
+    except Exception as e:
+        if isinstance(e, ProbeError) and e.stage == "size":
+            raise ProbeError("sub", e.detail)
         try:
-            import urllib.request
-            req = urllib.request.Request(
-                url, headers={"User-Agent": "vless-forge/2.0-subscriber"})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                text = r.read().decode("utf-8", "replace")
-        except Exception as e:
-            raise ProbeError("sub", f"cannot fetch subscription: {e}")
+            text = _urllib_get(url, timeout, max_bytes)
+        except ProbeError:
+            raise
+        except Exception as e2:
+            raise ProbeError("sub", f"cannot fetch subscription: {e2}")
     return text_to_lines(text)

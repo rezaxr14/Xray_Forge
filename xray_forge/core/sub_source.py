@@ -22,7 +22,9 @@ import urllib.request
 from dataclasses import dataclass, field, asdict
 
 from xray_forge.core.settings import data_dir
-from xray_forge.core.subscription import text_to_lines
+from urllib.parse import urlsplit
+
+from xray_forge.core.subscription import text_to_lines, MAX_SUB_BYTES
 from xray_forge.core.dedup import dedup_configs
 
 USER_AGENT = "xray-forge/2.1-subscriber"
@@ -135,18 +137,30 @@ class SourceManager:
     def _http_get(self, url: str, etag: str = "",
                   timeout: float = 15.0) -> tuple[int, str, str]:
         """Return (status, text, new_etag). status 304 means 'use cache'."""
+        if urlsplit(url).scheme.lower() not in ("http", "https"):
+            raise ValueError("only http/https source URLs are supported")
         headers = {"User-Agent": USER_AGENT}
         if etag:
             headers["If-None-Match"] = etag
         req = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                text = r.read().decode("utf-8", "replace")
+                data = r.read(MAX_SUB_BYTES + 1)
+                if len(data) > MAX_SUB_BYTES:
+                    raise ValueError("response too large for a subscription")
+                text = data.decode("utf-8", "replace")
                 return r.status, text, (r.headers.get("ETag") or "")
         except urllib.error.HTTPError as e:
             if e.code == 304:
                 return 304, "", etag
             raise
+
+    @staticmethod
+    def _require_configs(text: str) -> None:
+        """A 200 that holds no configs (captive portal, error page, block page)
+        must not overwrite a good cache -- it counts as a failed fetch."""
+        if not text_to_lines(text):
+            raise ValueError("response contained no configs (kept cache)")
 
     def fetch(self, src: Source, force: bool = False,
               timeout: float = 15.0) -> list[str]:
@@ -162,6 +176,7 @@ class SourceManager:
                     status_note = "304 not modified"
                     text = cached
                 else:
+                    self._require_configs(text)
                     src.etag = new_etag
                     self._write_cache(src.url, text)
             except Exception as e:
@@ -170,6 +185,7 @@ class SourceManager:
         else:
             try:
                 status, text, new_etag = self._http_get(src.url, "", timeout)
+                self._require_configs(text)
                 src.etag = new_etag
                 self._write_cache(src.url, text)
             except Exception as e:

@@ -7,7 +7,7 @@ from urllib.parse import urlencode, quote
 
 from xray_forge.core.models import Outbound
 from xray_forge.core.protocols.base import (
-    ProtocolHandler, hostport, xray_stream,
+    ProtocolHandler, append_extra_params, hostport, xray_stream,
 )
 
 
@@ -41,11 +41,17 @@ class TrojanHandler(ProtocolHandler):
                 params.append(("pbk", out.public_key))
             if out.short_id:
                 params.append(("sid", out.short_id))
+            if out.spider_x:
+                params.append(("spx", out.spider_x))
+        if out.flow:
+            params.append(("flow", out.flow))
         if out.alpn:
             params.append(("alpn", out.alpn))
         if out.allow_insecure:
             params.append(("allowInsecure", "1"))
-        qs = urlencode(params, quote_via=quote)
+        if out.extra.get("cs"):
+            params.append(("cs", out.extra["cs"]))
+        qs = urlencode(append_extra_params(params, out), quote_via=quote)
         name = quote(out.name or f"{out.host}:{out.port}", safe="")
         return f"trojan://{quote(out.credential, safe='')}@{hostport(out)}?{qs}#{name}"
 

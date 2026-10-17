@@ -6,7 +6,7 @@ from typing import Any
 from urllib.parse import urlencode, quote
 
 from xray_forge.core.models import Outbound, b64_encode
-from xray_forge.core.protocols.base import ProtocolHandler, hostport
+from xray_forge.core.protocols.base import ProtocolHandler, append_extra_params, hostport
 
 
 class ShadowsocksHandler(ProtocolHandler):
@@ -23,6 +23,7 @@ class ShadowsocksHandler(ProtocolHandler):
         plugin = out.extra.get("plugin")
         if plugin:
             params.append(("plugin", plugin))
+        params = append_extra_params(params, out)
         qs = ("?" + urlencode(params, quote_via=quote)) if params else ""
         name = quote(out.name or f"{out.host}:{out.port}", safe="")
         return f"ss://{userinfo}@{hostport(out)}{qs}#{name}"

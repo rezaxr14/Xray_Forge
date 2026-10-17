@@ -70,6 +70,11 @@ class Outbound:
     # WireGuard / WARP (kept in ``extra`` by the wireguard handler)
     extra: dict = field(default_factory=dict)
 
+    # Share-link query parameters (vmess: JSON keys) that no field above
+    # models -- ech, pcs, vcn, pqv, extra (XHTTP), fm, authority, ... --
+    # kept verbatim so parse -> edit -> to_uri never silently drops them.
+    extra_params: dict = field(default_factory=dict)
+
     raw: str = ""
 
     # ------------------------------------------------------------ legacy API
@@ -156,6 +161,11 @@ def b64_encode(text: str, urlsafe: bool = False) -> str:
     return enc(raw).decode("ascii")
 
 
+_VMESS_MODELED = frozenset({
+    "v", "ps", "add", "port", "id", "aid", "scy", "security", "net", "type",
+    "host", "path", "tls", "sni", "alpn", "fp"})
+
+
 def vmess_json_to_outbound(payload: str, raw_line: str = "") -> Outbound | None:
     """Parse a vmess://<base64 json> link."""
     try:
@@ -165,6 +175,8 @@ def vmess_json_to_outbound(payload: str, raw_line: str = "") -> Outbound | None:
     if not isinstance(data, dict) or not data.get("add"):
         return None
     return Outbound(
+        extra_params={k: v for k, v in data.items()
+                      if k not in _VMESS_MODELED and v not in (None, "")},
         scheme="vmess",
         name=str(data.get("ps") or "vmess"),
         host=str(data.get("add") or ""),

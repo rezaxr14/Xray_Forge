@@ -146,6 +146,18 @@ def xray_stream(out: Outbound, frag_on: bool = False,
 # Shared URI helpers
 # ===========================================================================
 
+def append_extra_params(params: list[tuple[str, str]],
+                        out: Outbound) -> list[tuple[str, str]]:
+    """Re-emit the share-link params no field models (never override a key
+    the handler already set)."""
+    present = {k.lower() for k, _ in params}
+    for k, v in (out.extra_params or {}).items():
+        if k.lower() not in present:
+            params.append((k, str(v)))
+            present.add(k.lower())
+    return params
+
+
 def hostport(out: Outbound) -> str:
     host = f"[{out.host}]" if ":" in out.host and not out.host.startswith("[") else out.host
     return f"{host}:{out.port or '443'}"

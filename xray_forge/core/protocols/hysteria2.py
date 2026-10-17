@@ -6,7 +6,7 @@ from typing import Any
 from urllib.parse import urlencode, quote
 
 from xray_forge.core.models import Outbound
-from xray_forge.core.protocols.base import ProtocolHandler, hostport
+from xray_forge.core.protocols.base import ProtocolHandler, append_extra_params, hostport
 
 
 class Hysteria2Handler(ProtocolHandler):
@@ -31,6 +31,7 @@ class Hysteria2Handler(ProtocolHandler):
             params.append(("up", ex["up"]))
         if ex.get("down"):
             params.append(("down", ex["down"]))
+        params = append_extra_params(params, out)
         qs = ("?" + urlencode(params, quote_via=quote)) if params else ""
         name = quote(out.name or f"{out.host}:{out.port}", safe="")
         return f"{scheme}://{quote(out.credential, safe='')}@{hostport(out)}{qs}#{name}"

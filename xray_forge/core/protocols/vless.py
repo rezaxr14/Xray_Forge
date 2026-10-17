@@ -7,7 +7,7 @@ from urllib.parse import urlencode, quote
 
 from xray_forge.core.models import Outbound
 from xray_forge.core.protocols.base import (
-    ProtocolHandler, hostport, xray_stream,
+    ProtocolHandler, append_extra_params, hostport, xray_stream,
 )
 
 
@@ -18,7 +18,9 @@ class VlessHandler(ProtocolHandler):
     default_transport = "ws"
 
     def to_uri(self, out: Outbound) -> str:
-        params: list[tuple[str, str]] = [("encryption", "none")]
+        # VLESS encryption (mlkem...) lives in extra_params; "none" otherwise
+        params: list[tuple[str, str]] = [
+            ("encryption", out.extra_params.get("encryption") or "none")]
         if out.security:
             params.append(("security", out.security))
         if out.sni:
@@ -53,7 +55,7 @@ class VlessHandler(ProtocolHandler):
         cs = out.extra.get("cs")
         if cs:
             params.append(("cs", cs))
-        qs = urlencode(params, quote_via=quote)
+        qs = urlencode(append_extra_params(params, out), quote_via=quote)
         name = quote(out.name or f"{out.host}:{out.port}", safe="")
         return f"vless://{quote(out.credential, safe='')}@{hostport(out)}?{qs}#{name}"
 
@@ -64,7 +66,7 @@ class VlessHandler(ProtocolHandler):
                 "address": out.host,
                 "port": int(out.port) if str(out.port).isdigit() else 443,
                 "users": [{"id": out.credential,
-                           "encryption": "none",
+                           "encryption": out.extra_params.get("encryption") or "none",
                            "flow": out.flow or ""}],
             }]},
         }

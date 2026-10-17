@@ -36,6 +36,8 @@ class VmessHandler(ProtocolHandler):
             "alpn": out.alpn,
             "fp": out.fingerprint,
         }
+        for k, v in (out.extra_params or {}).items():
+            payload.setdefault(k, v)          # keep unmodeled JSON keys
         return "vmess://" + b64_encode(json.dumps(payload, ensure_ascii=False))
 
     def xray_outbound(self, out: Outbound) -> dict[str, Any] | None:

@@ -299,7 +299,8 @@ def _parse_ss(line: str, parts) -> Outbound | None:
                     port=port or "443", credential=unquote(password),
                     ss_method=unquote(method), transport="tcp",
                     allow_insecure=False, raw=line.strip(),
-                    extra={"plugin": params.get("plugin", "")})
+                    extra={"plugin": params.get("plugin", "")},
+                    extra_params=_unmodeled_params(parts.query))
 
 
 def _parse_hysteria2(line: str, parts) -> Outbound | None:
@@ -322,6 +323,7 @@ def _parse_hysteria2(line: str, parts) -> Outbound | None:
         extra={"obfs": params.get("obfs", ""),
                "obfs-password": params.get("obfs-password", ""),
                "up": params.get("up", ""), "down": params.get("down", "")},
+        extra_params=_unmodeled_params(parts.query),
         raw=line.strip())
 
 
@@ -346,7 +348,39 @@ def _parse_tuic(line: str, parts) -> Outbound | None:
         extra={"password": password,
                "congestion_control": params.get("congestion_control", "bbr"),
                "udp_relay_mode": params.get("udp_relay_mode", "native")},
+        extra_params=_unmodeled_params(parts.query),
         raw=line.strip())
+
+
+# Query keys (lower-case) that some Outbound field models.  Everything else is
+# kept in ``Outbound.extra_params`` and re-emitted by the handlers.
+_MODELED_PARAMS = frozenset({
+    "security", "sni", "host", "path", "type", "fp", "alpn", "servicename",
+    "service_name", "headertype", "flow", "pbk", "sid", "spx", "allowinsecure",
+    "insecure", "cs", "encryption", "mode", "plugin", "obfs", "obfs-password",
+    "up", "down", "congestion_control", "udp_relay_mode",
+})
+_TRANSPORT_ALIASES = {"raw": "tcp", "splithttp": "xhttp"}
+
+
+def _unmodeled_params(query: str, transport: str = "") -> dict[str, str]:
+    """Query params no Outbound field models (first occurrence wins)."""
+    kept: dict[str, str] = {}
+    seen: set[str] = set()
+    for k, v in parse_qsl(query, keep_blank_values=True):
+        lk = k.lower()
+        if lk in seen:
+            continue
+        seen.add(lk)
+        if lk in _MODELED_PARAMS:
+            if lk == "mode" and transport != "xhttp":
+                pass                      # only modeled for xhttp
+            elif lk == "encryption" and v.strip().lower() != "none":
+                pass                      # VLESS encryption (mlkem...) is real data
+            else:
+                continue
+        kept[k] = v
+    return kept
 
 
 def parse_target(line: str) -> Outbound | None:
@@ -396,13 +430,17 @@ def parse_target(line: str) -> Outbound | None:
     if parts.password:
         credential += ":" + unquote(parts.password)
     security = pd.get("security", "").lower()
+    # Xray share-link spec: `type` defaults to tcp (a Reality link without it
+    # is NOT a websocket); `raw` is the new name of tcp, `splithttp` of xhttp.
+    transport = pd.get("type", "tcp").lower() or "tcp"
+    transport = _TRANSPORT_ALIASES.get(transport, transport)
     return Outbound(
         name=name,
         scheme=scheme,
         host=host,
         port=port or "443",
         credential=credential,
-        transport=pd.get("type", "ws").lower(),
+        transport=transport,
         security="reality" if security == "reality" else security,
         sni=sni,
         host_header=hdr,
@@ -417,6 +455,7 @@ def parse_target(line: str) -> Outbound | None:
         spider_x=pd.get("spx", ""),
         allow_insecure=pd.get("allowinsecure", "0") in ("1", "true"),
         extra={"cs": pd.get("cs", ""), "mode": pd.get("mode", "")},
+        extra_params=_unmodeled_params(parts.query, transport),
         raw=line,
     )
 

@@ -6,7 +6,7 @@ from typing import Any
 from urllib.parse import urlencode, quote
 
 from xray_forge.core.models import Outbound
-from xray_forge.core.protocols.base import ProtocolHandler, hostport
+from xray_forge.core.protocols.base import ProtocolHandler, append_extra_params, hostport
 
 
 class TuicHandler(ProtocolHandler):
@@ -28,6 +28,7 @@ class TuicHandler(ProtocolHandler):
             params.append(("udp_relay_mode", ex["udp_relay_mode"]))
         if out.allow_insecure:
             params.append(("insecure", "1"))
+        params = append_extra_params(params, out)
         qs = ("?" + urlencode(params, quote_via=quote)) if params else ""
         user, _, pwd = out.credential.partition(":")
         password = ex.get("password", "") or pwd

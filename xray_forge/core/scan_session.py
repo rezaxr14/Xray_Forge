@@ -27,6 +27,10 @@ from xray_forge.core.scanner import sample_cidr, ip_meta, tcp_jitter
 from xray_forge.core.settings import data_dir
 from xray_forge.core.probe import tcp_ping
 
+from xray_forge.core.log import get_logger
+
+log = get_logger(__name__)
+
 
 @dataclass
 class ScanResult:
@@ -79,8 +83,8 @@ class ScanSession:
                 r = ScanResult.from_dict(item)
                 self.results[r.ip] = r
             self.pending = list(data.get("pending", []))
-        except (OSError, json.JSONDecodeError):
-            pass
+        except (OSError, json.JSONDecodeError) as e:
+            log.warning("cannot load scan session %s: %s", self.state_path, e)
 
     def save(self) -> None:
         try:
@@ -91,8 +95,8 @@ class ScanSession:
                     "pending": self.pending,
                     "results": [r.to_dict() for r in self.results.values()],
                 }, f, indent=1)
-        except OSError:
-            pass
+        except OSError as e:
+            log.warning("cannot save scan session %s: %s", self.state_path, e)
 
     # ------------------------------------------------------------- setup
     def set_targets(self, cidrs: list[str], count: int = 200,

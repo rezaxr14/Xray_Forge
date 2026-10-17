@@ -120,6 +120,8 @@ def _fmt_bps(stage) -> str:
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
+        from xray_forge.core.log import configure
+        configure()  # rotating file log in ~/.xray_forge/logs
         self.title(
             f"⚡ VLESS Forge v{__version__} — fix · test · exit-country · "
             f"xray-core · ip scanner · export")

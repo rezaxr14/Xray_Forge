@@ -11,6 +11,10 @@ import json
 import os
 from typing import Any
 
+from xray_forge.core.log import get_logger
+
+log = get_logger(__name__)
+
 
 def settings_path() -> str:
     """Return the path to the settings JSON file."""
@@ -39,8 +43,10 @@ def load_settings() -> dict[str, Any]:
             data = json.load(f)
         if isinstance(data, dict):
             return data
-    except (OSError, json.JSONDecodeError):
-        pass
+    except OSError as e:
+        log.warning("cannot read settings %s: %s", path, e)
+    except json.JSONDecodeError as e:
+        log.warning("settings %s is not valid JSON (%s); using defaults", path, e)
     return {}
 
 
@@ -49,5 +55,5 @@ def save_settings(data: dict[str, Any]) -> None:
     try:
         from xray_forge.core.fsutil import write_private
         write_private(path, json.dumps(data, indent=2, ensure_ascii=False))
-    except OSError:
-        pass  # best-effort persistence
+    except OSError as e:
+        log.warning("cannot save settings %s: %s", path, e)  # best-effort

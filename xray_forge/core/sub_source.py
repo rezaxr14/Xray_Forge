@@ -27,6 +27,10 @@ from urllib.parse import urlsplit
 from xray_forge.core.subscription import text_to_lines, MAX_SUB_BYTES
 from xray_forge.core.dedup import dedup_configs
 
+from xray_forge.core.log import get_logger
+
+log = get_logger(__name__)
+
 USER_AGENT = "xray-forge/2.1-subscriber"
 
 
@@ -70,16 +74,16 @@ class SourceManager:
                 s = Source.from_dict(item)
                 if s:
                     self.sources.append(s)
-        except (OSError, json.JSONDecodeError):
-            pass
+        except (OSError, json.JSONDecodeError) as e:
+            log.warning("cannot load sources from %s: %s", self.state_path, e)
 
     def _save(self) -> None:
         try:
             with open(self.state_path, "w", encoding="utf-8") as f:
                 json.dump({"sources": [s.to_dict() for s in self.sources]},
                           f, indent=2, ensure_ascii=False)
-        except OSError:
-            pass
+        except OSError as e:
+            log.warning("cannot save sources to %s: %s", self.state_path, e)
 
     # -------------------------------------------------------------- source
     def add(self, url: str, name: str = "") -> Source:
@@ -130,8 +134,8 @@ class SourceManager:
         try:
             with open(self._cache_path(url), "w", encoding="utf-8") as f:
                 f.write(text)
-        except OSError:
-            pass
+        except OSError as e:
+            log.warning("cannot cache subscription %s: %s", url, e)
 
     # -------------------------------------------------------------- fetch
     def _http_get(self, url: str, etag: str = "",

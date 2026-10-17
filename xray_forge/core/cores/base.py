@@ -25,6 +25,10 @@ from typing import Any
 from xray_forge.core.models import Outbound
 from xray_forge.core.protocols import handler_for, iter_handlers, supported_schemes
 
+from xray_forge.core.log import get_logger
+
+log = get_logger(__name__)
+
 
 class CoreAdapter:
     name: str = ""            # machine name: "xray" | "singbox" | "mihomo"
@@ -173,6 +177,7 @@ def run_socks_probe(core: "CoreAdapter", binary: str, cfg: dict[str, Any],
             except OSError:
                 pass
             res["status"] = ("core exited: " + tail) if tail else "core failed to start"
+            log.warning("core did not open socks port %s: %s", socks_port, res["status"])
             return res
         from xray_forge.core.probe import ProbeError
         try:
@@ -282,6 +287,8 @@ def running_core(core: "CoreAdapter", outbounds: list[Outbound], *,
                 tail = lines[-1][:80] if lines else ""
             except OSError:
                 pass
+            log.warning("%s did not open socks port %s (stderr tail: %r)",
+                        core.name, port, tail)
             raise RuntimeError(("{} exited: " + tail).format(core.name) if tail
                                else f"{core.name} failed to open socks port "
                                     f"{port} within {wait:.0f}s")

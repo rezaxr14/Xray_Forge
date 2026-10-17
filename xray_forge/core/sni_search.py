@@ -29,6 +29,10 @@ from dataclasses import dataclass, asdict
 from xray_forge.core.probe import ProbeError, tls_connect, parse_frag
 from xray_forge.core.settings import data_dir
 
+from xray_forge.core.log import get_logger
+
+log = get_logger(__name__)
+
 # Domains commonly seen as fronting/SNI candidates in public write-ups.
 # The search tells you which of these your network actually lets through.
 DEFAULT_SNI_CANDIDATES = [
@@ -99,8 +103,8 @@ class SniSearch:
                 self.results[(h.ip, h.sni)] = h
             self.pending = [(ip, sni) for ip, sni in data.get("pending", [])]
             self.port = str(data.get("port") or "443")
-        except (OSError, json.JSONDecodeError, ValueError):
-            pass
+        except (OSError, json.JSONDecodeError, ValueError) as e:
+            log.warning("cannot load SNI session %s: %s", self.state_path, e)
 
     def save(self) -> None:
         try:
@@ -112,8 +116,8 @@ class SniSearch:
                     "pending": [list(p) for p in self.pending],
                     "results": [h.to_dict() for h in self.results.values()],
                 }, f, indent=1)
-        except OSError:
-            pass
+        except OSError as e:
+            log.warning("cannot save SNI session %s: %s", self.state_path, e)
 
     # ------------------------------------------------------------- setup
     @staticmethod

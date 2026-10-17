@@ -317,6 +317,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="xray-forge",
         description="Xray Forge — VLESS/Trojan/VMess/SS/Hysteria2/TUIC/WARP utility")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="log debug output to stderr (also ~/.xray_forge/logs)")
     sub = parser.add_subparsers(dest="cmd")
 
     sub.add_parser("gui", help="launch GUI (default)")
@@ -434,6 +436,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     cmd = args.cmd
+    from xray_forge.core.log import configure
+    configure(verbose=args.verbose, stderr=args.verbose)
 
     if cmd == "version":
         print(f"xray-forge {__version__}")

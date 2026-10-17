@@ -323,6 +323,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("gui", help="launch GUI (default)")
     sub.add_parser("version", help="print version")
+    sub.add_parser("serve", help="run the engine API (JSON-RPC over stdin/stdout)")
 
     p_conv = sub.add_parser("convert", help="convert configs")
     p_conv.add_argument("infile")
@@ -442,6 +443,9 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == "version":
         print(f"xray-forge {__version__}")
         return 0
+    if cmd == "serve":
+        from xray_forge.engine.server import serve
+        return serve()
     if cmd == "convert":
         cli_convert(args.infile, args.outfile, args.fp, args.cs, args.fm,
                     args.ip, args.port, args.template, args.start,

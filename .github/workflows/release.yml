@@ -64,7 +64,8 @@ jobs:
           mkdir -p dist/pkg
           cp dist/XrayForge.exe dist/pkg/
           cp README.md LICENSE dist/pkg/ 2>/dev/null || cp README.md dist/pkg/
-          cd dist/pkg && zip -r ../${{ matrix.artifact }}.zip . && cd ..
+          # no `zip` binary on the Windows runners; archive with the stdlib
+          python -c "import shutil; shutil.make_archive('dist/${{ matrix.artifact }}', 'zip', 'dist/pkg')"
 
       - name: Package (Linux)
         if: runner.os == 'Linux'

@@ -298,3 +298,26 @@ test('MITM tab builds a config, shows the guide and generates a constrained CA',
     assert.deepEqual(problems, []);
   } finally { await close(); }
 });
+
+test('Cores tab detects, validates and saves a core path', opts, async () => {
+  const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path');
+  if (process.platform === 'win32') return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-core-'));
+  const exe = path.join(dir, 'xray');
+  fs.writeFileSync(exe, '#!/bin/sh\necho "Xray 25.1.1"\n', { mode: 0o755 });
+  const { page, problems, close } = await launch();
+  try {
+    await page.click('[data-tab=cores]');
+    await page.waitForSelector('#co-table tbody tr');
+    assert.equal(await page.locator('#co-table tbody tr').count(), 3);
+    await page.fill('[data-core=xray]', path.join(dir, 'nope'));
+    await page.click('[data-row=xray] [data-act=set]');
+    await page.waitForFunction(() => /executable/.test(document.querySelector('#co-msg').textContent));
+    await page.fill('[data-core=xray]', exe);
+    await page.click('[data-row=xray] [data-act=set]');
+    await page.waitForFunction(() => /Xray 25\.1\.1/.test(document.querySelector('#co-table').textContent));
+    await page.click('[data-row=xray] [data-act=clear]');
+    await page.waitForFunction(() => /cleared/.test(document.querySelector('#co-msg').textContent));
+    assert.deepEqual(problems, []);
+  } finally { await close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});

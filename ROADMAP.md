@@ -74,6 +74,7 @@ See `docs/engine-api.md`.
   `tools/smoke_engine.py` gate, `tools/check_version.py`; see
   `docs/packaging.md`. **Not yet run**: the first `workflow_dispatch`/tag
   build is the real test; unsigned installers; no lock file yet.
+- ✅ Cores tab: detect xray/sing-box/mihomo (saved path, env, v2rayN, ./bin, PATH), set/clear path; `health.run` explains a missing core.
 - ⬜ Step 5: retire the Tk GUI once the Electron app has feature parity.
 
 ---

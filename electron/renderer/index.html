@@ -20,6 +20,7 @@
       <button role="tab" data-tab="sni" aria-selected="false">SNI search</button>
       <button role="tab" data-tab="warp" aria-selected="false">WARP</button>
       <button role="tab" data-tab="mitm" aria-selected="false">MITM fronting</button>
+      <button role="tab" data-tab="cores" aria-selected="false">Cores</button>
     </nav>
     <span id="engine-status" class="muted" aria-live="polite">engine: connecting…</span>
   </header>
@@ -210,6 +211,21 @@
     </section>
 
     <!-- MITM fronting -->
+    <section id="tab-cores" class="tab" role="tabpanel" hidden>
+      <p class="muted">Proxy cores are used for real health checks. The engine looks in your saved path, environment variables
+        (XRAY_CORE, SINGBOX_CORE, MIHOMO_CORE), v2rayN folders, ./bin and PATH.</p>
+      <div class="row">
+        <button id="co-detect" class="primary">Detect again</button>
+        <span id="co-msg" class="muted" role="status"></span>
+      </div>
+      <div class="table-wrap">
+        <table id="co-table">
+          <thead><tr><th>Core</th><th>Found</th><th>Version</th><th>Source</th><th>Path</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
     <section id="tab-mitm" class="tab" role="tabpanel" hidden>
       <div class="row">
         <fieldset id="mt-groups"><legend>Service families</legend></fieldset>

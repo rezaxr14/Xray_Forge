@@ -477,3 +477,33 @@ $('#mt-ca').addEventListener('click', () => guarded($('#mt-msg'), async () => {
     $('#engine-status').textContent = `engine unavailable: ${e.message}`;
   }
 })();
+
+// ------------------------------------------------------------------ Cores
+function renderCores(rows) {
+  const body = $('#co-table tbody');
+  body.replaceChildren();
+  for (const r of rows) {
+    const input = h('input', { type: 'text', 'data-core': r.name, value: r.configured || r.path || '',
+      placeholder: 'absolute path to executable', size: 40 });
+    const apply = async (path) => {
+      await guarded($('#co-msg'), async () => {
+        const res = await call('core.set_path', { name: r.name, path });
+        say($('#co-msg'), path ? `${res.display_name}: ${res.version}` : `${res.display_name}: path cleared`);
+        await refreshCores(true);
+      });
+    };
+    body.append(h('tr', { 'data-row': r.name },
+      h('td', {}, r.display_name), h('td', {}, r.found ? (r.ok ? 'yes' : 'found, no version') : 'no'),
+      h('td', {}, r.version), h('td', {}, r.source || ''), h('td', {}, input),
+      h('td', {}, h('button', { 'data-act': 'set', onclick: () => apply(input.value.trim()) }, 'Set'),
+        h('button', { 'data-act': 'clear', onclick: () => apply('') }, 'Clear'))));
+  }
+}
+async function refreshCores(keepMsg) {
+  if (!keepMsg) say($('#co-msg'), 'detecting…');
+  const rows = await call('core.detect');
+  renderCores(rows);
+  if (!keepMsg) say($('#co-msg'), `${rows.filter((r) => r.found).length} of ${rows.length} cores found`);
+}
+onTab.cores = () => guarded($('#co-msg'), () => refreshCores(false));
+$('#co-detect').addEventListener('click', onTab.cores);

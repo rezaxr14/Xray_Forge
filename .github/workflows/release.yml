@@ -45,7 +45,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller pytest cryptography
 
       - name: Run tests
         run: python -m pytest tests -q
@@ -157,7 +157,9 @@ jobs:
       - name: Build the engine (PyInstaller, one-folder)
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt cryptography pyinstaller
+          # -e . makes `import xray_forge` work from any working directory
+          # (the electron-builder step reads the version from electron/)
+          pip install -e . -r requirements.txt cryptography pyinstaller
           pyinstaller --noconfirm --onedir --name xray-forge-engine \
             --exclude-module tkinter \
             --collect-submodules xray_forge \

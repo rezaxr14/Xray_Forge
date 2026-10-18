@@ -67,6 +67,34 @@ def test_scan_cancel_keeps_rest_pending(monkeypatch):
     assert done["result"]["pending"] > 0
 
 
+def test_scan_resume_without_ranges(monkeypatch):
+    import threading
+    gate, started = threading.Event(), threading.Event()
+    calls = []
+
+    def jitter(ip, port, attempts=2, timeout=5.0):
+        calls.append(ip)
+        started.set()
+        if not gate.is_set():
+            gate.wait(3)
+        return (None, None)
+    monkeypatch.setattr(scan_session, "tcp_jitter", jitter)
+    c = Client()
+    r = c.result("scan.run", cidrs=["10.2.0.0/24"], count=30, workers=1, session="rs")
+    assert started.wait(2)
+    c.result("job.cancel", job=r["job"])
+    gate.set()
+    done = c.wait_job(r["job"])
+    left = done["result"]["pending"]
+    assert left > 0
+    calls.clear()
+    r2 = c.result("scan.run", cidrs=[], session="rs", resume=True, workers=2)
+    assert r2["targets"] == left
+    assert c.wait_job(r2["job"])["result"]["pending"] == 0
+    assert c.call("scan.run", cidrs=[], resume=True)["error"]["code"] == -32602
+    assert c.call("scan.run", cidrs=[], session="rs", resume=True)["error"]["code"] == -32602
+
+
 def test_scan_validation():
     c = Client()
     for bad in ({"cidrs": []}, {"cidrs": ["10.0.0.0/30"], "port": "99999"},

@@ -63,7 +63,11 @@ See `docs/engine-api.md`.
   the real engine (`cd electron && npm test`; CI job `ui`).
   Not covered by tests: the ~40-line `main.js`/`preload.js` glue (needs the
   Electron binary).
-- ⬜ Step 3: Scanner, SNI search, WARP and MITM tabs (+ engine methods).
+- ✅ Step 3: IP scanner, SNI search, WARP and MITM-fronting tabs with their
+  engine methods (streamed, cancellable jobs; saved sessions; resume).
+  Verified offline with fakes in Python tests and, in the browser, against a
+  closed local port; live WARP registration/scan and a real alive-host scan
+  are not exercised by CI.
 - ⬜ Step 4: packaging (PyInstaller engine + electron-builder) and release
   workflow.
 - ⬜ Step 5: retire the Tk GUI once the Electron app has feature parity.

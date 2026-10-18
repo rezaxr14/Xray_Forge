@@ -96,8 +96,10 @@ def register(d: Dispatcher, jobs: JobManager) -> None:
                  timeout: float = 5.0, session: str | None = None,
                  resume: bool = False) -> dict:
         cidr_list = _str_list(cidrs, "cidrs")
-        if not cidr_list:
+        if not cidr_list and not resume:
             raise invalid_params("cidrs must not be empty")
+        if resume and not session:
+            raise invalid_params("resume needs a session name")
         count = _int(count, 1, 5000, "count")
         workers = _int(workers, 1, 256, "workers")
         port = _port(port)
@@ -105,7 +107,8 @@ def register(d: Dispatcher, jobs: JobManager) -> None:
         sess = ScanSession(name)
         n = sess.set_targets(cidr_list, count, resume=bool(resume))
         if n == 0:
-            raise invalid_params("no scannable IPs in the given ranges")
+            raise invalid_params("nothing to resume" if resume
+                                 else "no scannable IPs in the given ranges")
         if n > MAX_TARGETS:
             raise invalid_params("too many targets")
 

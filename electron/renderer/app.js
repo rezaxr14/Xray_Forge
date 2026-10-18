@@ -33,8 +33,8 @@ window.forge.onJob((ev) => {
   else { if (!jobBuffer.has(ev.job)) jobBuffer.set(ev.job, []); jobBuffer.get(ev.job).push(ev); }
 });
 
-async function runJob(method, params, onEvent) {
-  const { job } = await window.forge.call(method, params);
+async function runJob(method, params, onEvent, existingJob) {
+  const job = existingJob || (await window.forge.call(method, params)).job;
   const wrapped = (ev) => {
     onEvent(ev);
     if (ev.type === 'done' || ev.type === 'error') { jobHandlers.delete(job); jobBuffer.delete(job); }
@@ -56,12 +56,15 @@ async function guarded(msgEl, fn) {
 
 const linesOf = (text) => text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
 
+const onTab = {};
+
 // ------------------------------------------------------------------ tabs
 document.querySelectorAll('nav [role=tab]').forEach((btn) => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('nav [role=tab]').forEach((b) => b.setAttribute('aria-selected', String(b === btn)));
     document.querySelectorAll('.tab').forEach((s) => { s.hidden = s.id !== `tab-${btn.dataset.tab}`; });
-    if (btn.dataset.tab === 'subs') refreshSubs();
+    const hook = onTab[btn.dataset.tab];
+    if (hook) guarded($('#engine-status'), hook);
   });
 });
 
@@ -257,6 +260,210 @@ $('#sub-load').addEventListener('click', () => guarded($('#sub-msg'), async () =
   const r = await window.forge.call('sub.configs', { dedupe: true });
   await setConfigs(r.lines);
   document.querySelector('[data-tab=configs]').click();
+}));
+
+// ------------------------------------------------------------- helpers
+const call = (m, p = {}) => window.forge.call(m, p);
+const fmtMs = (v) => (v == null ? '' : String(Math.round(v)));
+
+function fillSelect(sel, items, placeholder) {
+  const keep = sel.value;
+  sel.replaceChildren(h('option', { value: '' }, placeholder),
+    ...items.map((i) => h('option', { value: i.name }, `${i.name} (${i.label})`)));
+  if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
+}
+
+async function refreshScanSessions() {
+  const list = await call('scan.sessions');
+  const items = list.map((x) => ({ name: x.name, label: `${x.alive}/${x.total} alive${x.pending ? `, ${x.pending} pending` : ''}` }));
+  fillSelect($('#sc-sessions'), items, '(none)');
+  fillSelect($('#sn-from-scan'), items, '(none)');
+}
+
+function progressHandlers(prefix) {
+  return {
+    progress: (ev) => { $(`#${prefix}-progress`).max = ev.total || 1; $(`#${prefix}-progress`).value = ev.done; },
+  };
+}
+
+// --------------------------------------------------------------- scanner
+const sc = { rows: new Map(), job: null };
+
+function renderScan() {
+  const showDead = $('#sc-dead').checked;
+  const rows = [...sc.rows.values()].filter((r) => r.alive || showDead)
+    .sort((a, b) => (a.alive === b.alive ? (a.ms ?? 9e9) - (b.ms ?? 9e9) : a.alive ? -1 : 1));
+  $('#sc-table tbody').replaceChildren(...rows.map((r) => h('tr', { class: r.alive ? '' : 'bad' },
+    h('td', {}, r.ip), h('td', {}, r.port), h('td', {}, fmtMs(r.ms)), h('td', {}, fmtMs(r.jitter)),
+    h('td', {}, r.tls), h('td', {}, r.cc), h('td', {}, r.isp), h('td', {}, r.info))));
+}
+$('#sc-dead').addEventListener('change', renderScan);
+
+function scStatus() {
+  const all = [...sc.rows.values()];
+  return `${all.filter((r) => r.alive).length} alive of ${all.length} checked`;
+}
+
+async function startScan(resume) {
+  const cidrs = linesOf($('#sc-cidrs').value);
+  const params = {
+    cidrs, count: Number($('#sc-count').value), port: $('#sc-port').value,
+    workers: Number($('#sc-workers').value), geo: $('#sc-geo').checked,
+  };
+  if ($('#sc-sni').value.trim()) params.sni = $('#sc-sni').value.trim();
+  if (resume) { params.resume = true; params.session = $('#sc-sessions').value; }
+  const r = await call('scan.run', params);
+  sc.rows = new Map();
+  renderScan();
+  $('#sc-progress').value = 0;
+  $('#sc-start').disabled = true; $('#sc-resume').disabled = true; $('#sc-cancel').disabled = false;
+  say($('#sc-status'), `scanning ${r.targets} IPs…`);
+  sc.job = r.job;
+  await runJob(null, null, (ev) => {
+    if (ev.type === 'item') { sc.rows.set(ev.data.ip, ev.data); renderScan(); }
+    else if (ev.type === 'progress') { $('#sc-progress').max = ev.total; $('#sc-progress').value = ev.done; say($('#sc-status'), `${ev.done}/${ev.total} · ${scStatus()}`); }
+    else if (ev.type === 'done' || ev.type === 'error') {
+      $('#sc-start').disabled = false; $('#sc-resume').disabled = false; $('#sc-cancel').disabled = true;
+      say($('#sc-status'), ev.type === 'error' ? ev.message : `${ev.cancelled ? 'cancelled' : 'done'}: ${scStatus()}`, ev.type === 'error');
+      refreshScanSessions().catch(() => {});
+    }
+  }, r.job);
+}
+
+$('#sc-start').addEventListener('click', () => guarded($('#sc-status'), () => startScan(false)));
+$('#sc-resume').addEventListener('click', () => guarded($('#sc-status'), () => startScan(true)));
+$('#sc-cancel').addEventListener('click', () => { if (sc.job) call('job.cancel', { job: sc.job }); });
+$('#sc-load').addEventListener('click', () => guarded($('#sc-status'), async () => {
+  const name = $('#sc-sessions').value;
+  if (!name) { say($('#sc-status'), 'choose a saved scan first', true); return; }
+  const r = await call('scan.get', { session: name });
+  sc.rows = new Map(r.results.map((x) => [x.ip, x]));
+  renderScan();
+  say($('#sc-status'), `loaded ${name}: ${scStatus()}${r.pending ? `, ${r.pending} pending` : ''}`);
+}));
+$('#sc-export').addEventListener('click', () => guarded($('#sc-status'), async () => {
+  const name = $('#sc-sessions').value;
+  if (!name) { say($('#sc-status'), 'choose a saved scan to export', true); return; }
+  $('#sc-out').value = (await call('scan.export', { session: name, format: 'csv' })).content;
+}));
+$('#sc-to-sni').addEventListener('click', () => {
+  const ips = [...sc.rows.values()].filter((r) => r.alive).sort((a, b) => a.ms - b.ms).map((r) => r.ip);
+  $('#sn-ips').value = ips.join('\n');
+  document.querySelector('[data-tab=sni]').click();
+});
+onTab.scan = refreshScanSessions;
+
+// ------------------------------------------------------------ SNI search
+const sn = { rows: new Map(), job: null, session: '' };
+
+function renderSni() {
+  const rows = [...sn.rows.values()].filter((r) => r.ok)
+    .sort((a, b) => (b.http_ok - a.http_ok) || ((a.tls_ms ?? 9e9) - (b.tls_ms ?? 9e9)));
+  $('#sn-table tbody').replaceChildren(...rows.map((r) => h('tr', {},
+    h('td', {}, r.ip), h('td', {}, r.sni), h('td', {}, fmtMs(r.tls_ms)), h('td', {}, r.tls_ver),
+    h('td', {}, h('span', { class: `chip ${r.http_ok ? 'ok' : 'fail'}` }, r.http_ok ? 'ok' : 'no')),
+    h('td', {}, r.info))));
+}
+
+$('#sn-start').addEventListener('click', () => guarded($('#sn-status'), async () => {
+  const params = {
+    ips: linesOf($('#sn-ips').value.replace(/[,\s]+/g, '\n')),
+    snis: linesOf($('#sn-snis').value.replace(/[,\s]+/g, '\n')),
+    presets: $('#sn-presets').checked, http_check: $('#sn-http').checked,
+    port: $('#sn-port').value, workers: Number($('#sn-workers').value),
+  };
+  if ($('#sn-from-scan').value) params.from_scan = $('#sn-from-scan').value;
+  const r = await call('sni.run', params);
+  sn.rows = new Map(); sn.session = r.session; renderSni();
+  $('#sn-start').disabled = true; $('#sn-cancel').disabled = false;
+  say($('#sn-status'), `probing ${r.pairs} (IP, SNI) pairs…`);
+  sn.job = r.job;
+  await runJob(null, null, (ev) => {
+    if (ev.type === 'item') { sn.rows.set(`${ev.data.ip}|${ev.data.sni}`, ev.data); renderSni(); }
+    else if (ev.type === 'progress') { $('#sn-progress').max = ev.total; $('#sn-progress').value = ev.done; say($('#sn-status'), `${ev.done}/${ev.total} · ${[...sn.rows.values()].filter((x) => x.ok).length} working`); }
+    else if (ev.type === 'done' || ev.type === 'error') {
+      $('#sn-start').disabled = false; $('#sn-cancel').disabled = true;
+      say($('#sn-status'), ev.type === 'error' ? ev.message : `${ev.cancelled ? 'cancelled' : 'done'}: ${[...sn.rows.values()].filter((x) => x.ok).length} working of ${sn.rows.size}`, ev.type === 'error');
+    }
+  }, r.job);
+}));
+$('#sn-cancel').addEventListener('click', () => { if (sn.job) call('job.cancel', { job: sn.job }); });
+$('#sn-export').addEventListener('click', () => guarded($('#sn-status'), async () => {
+  if (!sn.session) { say($('#sn-status'), 'run a search first', true); return; }
+  $('#sn-out').value = (await call('sni.export', { session: sn.session, format: 'csv' })).content;
+}));
+onTab.sni = refreshScanSessions;
+
+// ------------------------------------------------------------------ WARP
+const wp = { job: null };
+
+async function refreshWarp() {
+  const st = await call('warp.status');
+  $('#wp-status').textContent = st.registered
+    ? `registered · device ${st.device_id}… · endpoint ${st.endpoint}` : 'no WARP device registered yet';
+  $('#wp-register').textContent = st.registered ? 'Re-register device' : 'Register WARP device';
+}
+onTab.warp = refreshWarp;
+
+$('#wp-register').addEventListener('click', () => guarded($('#wp-status'), async () => {
+  say($('#wp-status'), 'registering…');
+  await call('warp.register', {}).catch((e) => { throw e; });
+  await refreshWarp();
+}));
+$('#wp-scan').addEventListener('click', () => guarded($('#wp-status'), async () => {
+  const r = await call('warp.scan', { count: Number($('#wp-count').value) });
+  $('#wp-table tbody').replaceChildren();
+  $('#wp-scan').disabled = true; $('#wp-cancel').disabled = false;
+  wp.job = r.job;
+  await runJob(null, null, (ev) => {
+    if (ev.type === 'item') {
+      $('#wp-table tbody').append(h('tr', { onclick: () => { $('#wp-endpoint').value = ev.data.endpoint; } },
+        h('td', {}, ev.data.endpoint), h('td', {}, fmtMs(ev.data.ms))));
+    } else if (ev.type === 'progress') { $('#wp-progress').max = ev.total; $('#wp-progress').value = ev.done; }
+    else if (ev.type === 'done' || ev.type === 'error') {
+      $('#wp-scan').disabled = false; $('#wp-cancel').disabled = true;
+      if (ev.type === 'error') say($('#wp-status'), ev.message, true);
+    }
+  }, r.job);
+}));
+$('#wp-cancel').addEventListener('click', () => { if (wp.job) call('job.cancel', { job: wp.job }); });
+$('#wp-config').addEventListener('click', () => guarded($('#wp-status'), async () => {
+  const params = { format: $('#wp-format').value };
+  if ($('#wp-endpoint').value.trim()) params.endpoint = $('#wp-endpoint').value.trim();
+  $('#wp-out').value = (await call('warp.config', params)).content;
+}));
+
+// ----------------------------------------------------------- MITM fronting
+async function loadMitm() {
+  const g = await call('mitm.groups');
+  $('#mt-min').textContent = `requires Xray-core ≥ ${g.min_xray_version}`;
+  const box = $('#mt-groups');
+  if (box.querySelector('input')) return;
+  for (const name of Object.keys(g.groups)) {
+    box.append(h('label', {}, h('input', { type: 'checkbox', value: name, checked: g.defaults.includes(name) }), name));
+  }
+  const ca = await call('mitm.ca_paths');
+  $('#mt-ca-status').textContent = ca.exists ? `CA exists: ${ca.cert}` : 'no CA generated yet';
+}
+onTab.mitm = loadMitm;
+
+const mtGroups = () => [...document.querySelectorAll('#mt-groups input:checked')].map((i) => i.value);
+$('#mt-build').addEventListener('click', () => guarded($('#mt-msg'), async () => {
+  const r = await call('mitm.build', { groups: mtGroups(), use_generated_ca: $('#mt-use-ca').checked });
+  $('#mt-out').value = r.content;
+  say($('#mt-msg'), `built · needs Xray-core ≥ ${r.min_xray_version}`);
+}));
+$('#mt-guide').addEventListener('click', () => guarded($('#mt-msg'), async () => {
+  $('#mt-out').value = (await call('mitm.guide', { platform: $('#mt-platform').value })).content;
+  say($('#mt-msg'), '');
+}));
+$('#mt-ca').addEventListener('click', () => guarded($('#mt-msg'), async () => {
+  const params = { cn: $('#mt-cn').value.trim() };
+  const pd = $('#mt-permitted').value.split(/[,\s]+/).filter(Boolean);
+  if (pd.length) params.permitted_domains = pd;
+  const r = await call('mitm.generate_ca', params);
+  $('#mt-ca-status').textContent = `CA written: ${r.cert}${r.constrained ? ' (name-constrained)' : ''}`;
+  say($('#mt-msg'), r.note);
 }));
 
 // ------------------------------------------------------------------ boot

@@ -16,6 +16,10 @@
       <button role="tab" data-tab="convert" aria-selected="false">Convert</button>
       <button role="tab" data-tab="health" aria-selected="false">Health check</button>
       <button role="tab" data-tab="subs" aria-selected="false">Subscriptions</button>
+      <button role="tab" data-tab="scan" aria-selected="false">IP scanner</button>
+      <button role="tab" data-tab="sni" aria-selected="false">SNI search</button>
+      <button role="tab" data-tab="warp" aria-selected="false">WARP</button>
+      <button role="tab" data-tab="mitm" aria-selected="false">MITM fronting</button>
     </nav>
     <span id="engine-status" class="muted" aria-live="polite">engine: connecting…</span>
   </header>
@@ -117,6 +121,116 @@
           <tbody></tbody>
         </table>
       </div>
+    </section>
+
+    <!-- IP scanner -->
+    <section id="tab-scan" class="tab" role="tabpanel" hidden>
+      <div class="row">
+        <textarea id="sc-cidrs" rows="3" spellcheck="false" placeholder="CIDR ranges, one per line (e.g. 188.114.96.0/20)"></textarea>
+        <div class="col">
+          <label>Sample per range <input id="sc-count" type="number" min="1" max="5000" value="200"></label>
+          <label>Port <input id="sc-port" type="number" min="1" max="65535" value="443"></label>
+        </div>
+        <div class="col">
+          <label>SNI (optional) <input id="sc-sni" type="text" size="22"></label>
+          <label>Workers <input id="sc-workers" type="number" min="1" max="256" value="64"></label>
+        </div>
+      </div>
+      <div class="row">
+        <label><input id="sc-geo" type="checkbox"> Look up country / ISP</label>
+        <label><input id="sc-dead" type="checkbox"> Show unreachable</label>
+        <button id="sc-start" class="primary">Scan</button>
+        <button id="sc-cancel" disabled>Cancel</button>
+        <label>Saved scans <select id="sc-sessions"><option value="">(none)</option></select></label>
+        <button id="sc-load">Load</button>
+        <button id="sc-resume">Resume</button>
+        <button id="sc-export">Export CSV</button>
+        <button id="sc-to-sni">Alive IPs → SNI search</button>
+      </div>
+      <div class="row"><progress id="sc-progress" value="0" max="1"></progress><span id="sc-status" class="muted" role="status">idle</span></div>
+      <div class="table-wrap">
+        <table id="sc-table">
+          <thead><tr><th>IP</th><th>Port</th><th>ms</th><th>Jitter</th><th>TLS</th><th>Country</th><th>ISP</th><th>Info</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <textarea id="sc-out" rows="4" readonly spellcheck="false" placeholder="Export output appears here"></textarea>
+    </section>
+
+    <!-- SNI search -->
+    <section id="tab-sni" class="tab" role="tabpanel" hidden>
+      <div class="row">
+        <label>IPs <textarea id="sn-ips" rows="4" spellcheck="false" placeholder="Clean IPs, whitespace/comma separated"></textarea></label>
+        <label>SNIs / fronting hosts <textarea id="sn-snis" rows="4" spellcheck="false" placeholder="One per line"></textarea></label>
+      </div>
+      <div class="row">
+        <label><input id="sn-presets" type="checkbox"> Add built-in candidates</label>
+        <label><input id="sn-http" type="checkbox" checked> HTTP check</label>
+        <label>From saved scan <select id="sn-from-scan"><option value="">(none)</option></select></label>
+        <label>Port <input id="sn-port" type="number" min="1" max="65535" value="443"></label>
+        <label>Workers <input id="sn-workers" type="number" min="1" max="256" value="32"></label>
+        <button id="sn-start" class="primary">Search</button>
+        <button id="sn-cancel" disabled>Cancel</button>
+        <button id="sn-export">Export CSV</button>
+      </div>
+      <div class="row"><progress id="sn-progress" value="0" max="1"></progress><span id="sn-status" class="muted" role="status">idle</span></div>
+      <div class="table-wrap">
+        <table id="sn-table">
+          <thead><tr><th>IP</th><th>SNI</th><th>TLS ms</th><th>TLS</th><th>HTTP</th><th>Info</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <textarea id="sn-out" rows="4" readonly spellcheck="false" placeholder="Export output appears here"></textarea>
+    </section>
+
+    <!-- WARP -->
+    <section id="tab-warp" class="tab" role="tabpanel" hidden>
+      <div class="row">
+        <span id="wp-status" class="muted" role="status">checking…</span>
+        <button id="wp-register">Register WARP device</button>
+        <span class="muted">Contacts Cloudflare's WARP API; the key is stored on this machine only.</span>
+      </div>
+      <div class="row">
+        <label>Endpoints to sample <input id="wp-count" type="number" min="1" max="500" value="60"></label>
+        <button id="wp-scan">Scan endpoints</button>
+        <button id="wp-cancel" disabled>Cancel</button>
+        <progress id="wp-progress" value="0" max="1"></progress>
+      </div>
+      <div class="table-wrap">
+        <table id="wp-table"><thead><tr><th>Endpoint</th><th>ms</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="row">
+        <label>Endpoint <input id="wp-endpoint" type="text" size="24" placeholder="click a row, or leave empty"></label>
+        <label>Format
+          <select id="wp-format"><option value="singbox">sing-box</option><option value="xray">Xray</option><option value="mihomo">Mihomo</option></select>
+        </label>
+        <button id="wp-config" class="primary">Generate config</button>
+      </div>
+      <textarea id="wp-out" rows="10" readonly spellcheck="false" placeholder="Outbound JSON appears here (contains your WireGuard key: treat it as a secret)"></textarea>
+    </section>
+
+    <!-- MITM fronting -->
+    <section id="tab-mitm" class="tab" role="tabpanel" hidden>
+      <div class="row">
+        <fieldset id="mt-groups"><legend>Service families</legend></fieldset>
+        <span id="mt-min" class="muted"></span>
+      </div>
+      <div class="row">
+        <label><input id="mt-use-ca" type="checkbox"> Use the generated CA paths</label>
+        <button id="mt-build" class="primary">Build Xray config</button>
+        <label>Setup guide
+          <select id="mt-platform"><option value="windows">Windows</option><option value="android">Android</option></select>
+        </label>
+        <button id="mt-guide">Show guide</button>
+        <span id="mt-msg" class="muted" role="status"></span>
+      </div>
+      <div class="row">
+        <label>CA name <input id="mt-cn" type="text" size="24" value="Xray Forge MITM CA"></label>
+        <label>Restrict CA to domains (optional) <input id="mt-permitted" type="text" size="34" placeholder="google.com, youtube.com"></label>
+        <button id="mt-ca">Generate personal CA</button>
+        <span id="mt-ca-status" class="muted"></span>
+      </div>
+      <textarea id="mt-out" rows="14" readonly spellcheck="false" placeholder="Config or guide appears here"></textarea>
     </section>
   </main>
   <script src="app.js"></script>

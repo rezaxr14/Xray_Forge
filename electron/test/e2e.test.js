@@ -190,3 +190,111 @@ test('untrusted text is rendered as text, never as markup', opts, async () => {
     assert.deepEqual(problems.filter((p) => !/x:|Failed to load/.test(p)), []);
   } finally { await close(); }
 });
+
+// ---------------------------------------------------------------- step 3
+test('IP scanner streams an unreachable host, saves the session, exports CSV', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.click('[data-tab=scan]');
+    await page.fill('#sc-cidrs', '127.0.0.1/32');
+    await page.fill('#sc-port', '9');
+    await page.check('#sc-dead');
+    await page.click('#sc-start');
+    await page.waitForFunction(() => /^done/.test(document.querySelector('#sc-status').textContent), null, { timeout: 30000 });
+    assert.match(await page.textContent('#sc-status'), /done: 0 alive of 1 checked/);
+    assert.match(await page.textContent('#sc-table tbody tr'), /127\.0\.0\.1.*tcp filtered/);
+    await page.waitForFunction(() => document.querySelectorAll('#sc-sessions option').length === 2);
+    await page.selectOption('#sc-sessions', { index: 1 });
+    await page.click('#sc-load');
+    await page.waitForFunction(() => /^loaded/.test(document.querySelector('#sc-status').textContent));
+    await page.click('#sc-export');
+    await page.waitForFunction(() => document.querySelector('#sc-out').value.length > 0);
+    assert.match(await page.inputValue('#sc-out'), /^ip,port,alive/);
+    await page.uncheck('#sc-dead');
+    assert.equal(await page.locator('#sc-table tbody tr').count(), 0);
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('IP scanner rejects bad input with a readable message', opts, async () => {
+  const { page, close } = await launch();
+  try {
+    await page.click('[data-tab=scan]');
+    await page.click('#sc-start');
+    await page.waitForFunction(() => /cidrs/.test(document.querySelector('#sc-status').textContent));
+    await page.fill('#sc-cidrs', '10.0.0.0/30');
+    await page.fill('#sc-port', '70000');
+    await page.click('#sc-start');
+    await page.waitForFunction(() => /port/.test(document.querySelector('#sc-status').textContent));
+    assert.equal(await page.isDisabled('#sc-start'), false);
+  } finally { await close(); }
+});
+
+test('SNI search probes pairs and reports none working on a closed port', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.click('[data-tab=sni]');
+    await page.fill('#sn-ips', '127.0.0.1');
+    await page.fill('#sn-snis', 'a.example, b.example');
+    await page.fill('#sn-port', '9');
+    await page.click('#sn-start');
+    await page.waitForFunction(() => /^done/.test(document.querySelector('#sn-status').textContent), null, { timeout: 30000 });
+    assert.match(await page.textContent('#sn-status'), /done: 0 working of 2/);
+    await page.click('#sn-export');
+    await page.waitForFunction(() => document.querySelector('#sn-out').value.length > 0);
+    assert.match(await page.inputValue('#sn-out'), /^ip,port,sni/);
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('scanner results hand alive IPs to the SNI tab', opts, async () => {
+  const { page, close } = await launch();
+  try {
+    await page.click('[data-tab=scan]');
+    await page.click('#sc-to-sni');
+    assert.equal(await page.getAttribute('[data-tab=sni]', 'aria-selected'), 'true');
+    assert.equal(await page.inputValue('#sn-ips'), '');
+  } finally { await close(); }
+});
+
+test('WARP tab reports no device and explains a config request', opts, async () => {
+  const { page, close } = await launch();
+  try {
+    await page.click('[data-tab=warp]');
+    await page.waitForFunction(() => /no WARP device registered/.test(document.querySelector('#wp-status').textContent));
+    await page.click('#wp-config');
+    await page.waitForFunction(() => /register first/.test(document.querySelector('#wp-status').textContent));
+    assert.equal(await page.inputValue('#wp-out'), '');
+  } finally { await close(); }
+});
+
+test('MITM tab builds a config, shows the guide and generates a constrained CA', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.click('[data-tab=mitm]');
+    await page.waitForSelector('#mt-groups input');
+    assert.equal(await page.locator('#mt-groups input').count(), 3);
+    assert.match(await page.textContent('#mt-min'), /Xray-core ≥ \d/);
+    await page.click('#mt-build');
+    await page.waitForFunction(() => document.querySelector('#mt-out').value.includes('inbounds'));
+    assert.ok(JSON.parse(await page.inputValue('#mt-out')).outbounds.length > 0);
+
+    await page.uncheck('#mt-groups input[value=meta]');
+    await page.uncheck('#mt-groups input[value=fastly]');
+    await page.click('#mt-build');
+    await page.waitForFunction(() => /built/.test(document.querySelector('#mt-msg').textContent));
+
+    await page.selectOption('#mt-platform', 'android');
+    await page.click('#mt-guide');
+    await page.waitForFunction(() => /MITM-DomainFronting setup/.test(document.querySelector('#mt-out').value));
+
+    await page.fill('#mt-permitted', 'example.com');
+    await page.click('#mt-ca');
+    await page.waitForFunction(() => /name-constrained/.test(document.querySelector('#mt-ca-status').textContent), null, { timeout: 30000 });
+    assert.doesNotMatch(await page.textContent('#mt-ca-status'), /BEGIN/);
+    await page.check('#mt-use-ca');
+    await page.click('#mt-build');
+    await page.waitForFunction(() => document.querySelector('#mt-out').value.includes('mitm-ca.crt'));
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});

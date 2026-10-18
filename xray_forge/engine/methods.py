@@ -203,6 +203,13 @@ def build(emit, sources: SourceManager | None = None
             raise invalid_params("workers must be 1..64")
         if core is not None and core != "auto" and get_core(core) is None:
             raise invalid_params(f"unknown core: {core}")
+        if core:
+            from xray_forge.engine.core_methods import installed_cores
+            have = installed_cores()
+            if core == "auto" and not have:
+                raise invalid_params("no proxy core found; set a path in the Cores tab")
+            if core != "auto" and core not in have:
+                raise invalid_params(f"{core} not found; set its path in the Cores tab")
 
         def run(ctx: JobContext) -> dict:
             reports: list[dict] = []
@@ -249,6 +256,7 @@ def build(emit, sources: SourceManager | None = None
     def job_list() -> list[str]:
         return jobs.active()
 
-    from xray_forge.engine import scan_methods
+    from xray_forge.engine import scan_methods, core_methods
     scan_methods.register(d, jobs)
+    core_methods.register(d)
     return d, jobs

@@ -69,7 +69,9 @@ class CoreAdapter:
 
     # --------------------------------------------------------------- probe
     def find_binary(self) -> str:
-        return ""
+        """Path of this core's executable (see cores.discover), or ""."""
+        from xray_forge.core.cores import discover
+        return discover.find_binary(self.name)
 
     def probe(self, line: str, binary: str | None = None, timeout: float = 8.0,
               frag_on: bool = True, front_domain: str | None = None) -> dict[str, Any]:

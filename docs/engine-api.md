@@ -33,8 +33,20 @@ cancels everything and shuts the engine down.
 | `sub.list/add/remove/set_enabled/configs` | see code | source state |
 | `sub.fetch` | `force`, `timeout` | job |
 | `health.run` | `lines`, `workers`, `timeout`, `throughput`, `core` | job; items are reports |
+| `scan.run` | `cidrs`, `count`, `port`, `sni`, `workers`, `frag`, `geo`, `timeout`, `session`, `resume` | `{job, session, targets}`; items are scan results |
+| `scan.sessions` / `scan.get` / `scan.export` | `session`, `format` (`csv`/`json`) | saved scan data |
+| `sni.run` | `ips`, `snis`, `presets`, `from_scan`, `port`, `workers`, `frag`, `timeout`, `http_check`, `session`, `resume` | `{job, session, pairs}`; items are hits |
+| `sni.presets` / `sni.sessions` / `sni.get` / `sni.export` | – / `session` | saved SNI data |
+| `warp.status` | – | `{registered, device_id (12 chars), endpoint, ipv4, ipv6}`; never returns keys or tokens |
+| `warp.register` | – | status; talks to Cloudflare, saved 0600 |
+| `warp.config` | `endpoint`, `format` (`xray`/`singbox`/`mihomo`) | outbound JSON snippet (contains the WireGuard key: it is the user's own config) |
+| `warp.scan` | `count`, `workers` | job; items `{endpoint, ms}` |
+| `mitm.groups` / `mitm.build` | `groups`, `use_generated_ca` | route families / Xray config JSON |
+| `mitm.generate_ca` / `mitm.ca_paths` | `cn`, `permitted_domains` | paths only; key material is never returned |
+| `mitm.guide` | `platform` | setup text |
 | `job.cancel` / `job.list` | `job` | bool / ids |
 
 Errors use standard JSON-RPC codes; `-32602` for invalid params, `-32000` for
-a failure inside the engine (message is `Type: text`). Scan, SNI search, WARP
-and MITM methods follow in a later step.
+a failure inside the engine (message is `Type: text`).
+Session names (`session`) are restricted to `[A-Za-z0-9_.-]`, max 64
+characters, so a client cannot address files outside the data directory.

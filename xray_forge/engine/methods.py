@@ -249,4 +249,6 @@ def build(emit, sources: SourceManager | None = None
     def job_list() -> list[str]:
         return jobs.active()
 
+    from xray_forge.engine import scan_methods
+    scan_methods.register(d, jobs)
     return d, jobs

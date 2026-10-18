@@ -122,8 +122,11 @@ class ScanSession:
             sni: str | None = None, use_curl: bool = False,
             geo: bool = True, timeout: float = 5.0,
             stop: threading.Event | None = None,
-            progress=None, batch_size: int = 10) -> list[ScanResult]:
-        """Scan pending IPs. Returns the new results from this run."""
+            progress=None, batch_size: int = 10,
+            on_result=None) -> list[ScanResult]:
+        """Scan pending IPs. Returns the new results from this run.
+
+        ``on_result(ScanResult)`` fires as each IP completes (for live UIs)."""
         frag_t = parse_frag(frag)
         new: list[ScanResult] = []
 
@@ -177,6 +180,11 @@ class ScanSession:
                     continue
                 self.results[ip] = res
                 new.append(res)
+                if on_result:
+                    try:
+                        on_result(res)
+                    except Exception:
+                        log.exception("on_result callback failed")
                 if ip in self.pending:
                     self.pending.remove(ip)
                 done += 1

@@ -272,7 +272,7 @@ def probe_endpoint(host: str, port: int, timeout: float = 2.0) -> float | None:
 
 
 def scan_endpoints(count: int = 60, workers: int = 20,
-                   progress=None) -> list[tuple[str, float]]:
+                   progress=None, stop=None) -> list[tuple[str, float]]:
     """Scan candidate endpoints; returns [(host:port, ms)] best-first."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     cands = endpoint_candidates(count)
@@ -283,6 +283,10 @@ def scan_endpoints(count: int = 60, workers: int = 20,
             host, _, port = cand.partition(":")
             futs[ex.submit(probe_endpoint, host, int(port or 2408))] = cand
         for i, fut in enumerate(as_completed(futs)):
+            if stop is not None and stop.is_set():
+                for f in futs:
+                    f.cancel()
+                break
             if progress and (i % 10 == 0):
                 progress(i, len(futs))
             ms = fut.result()

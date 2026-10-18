@@ -27,7 +27,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict
 
 from xray_forge.core.probe import ProbeError, tls_connect, parse_frag
-from xray_forge.core.settings import data_dir
+from xray_forge.core import settings as _settings
 
 from xray_forge.core.log import get_logger
 
@@ -73,7 +73,7 @@ class SniHit:
 
 
 def _search_dir() -> str:
-    path = os.path.join(data_dir(), "sni_search")
+    path = os.path.join(_settings.data_dir(), "sni_search")
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -192,8 +192,11 @@ class SniSearch:
     def run(self, port: str = "443", workers: int = 32,
             frag: str = "5,94,1@2", timeout: float = 5.0,
             http_check: bool = True, stop: threading.Event | None = None,
-            progress=None, batch_size: int = 10) -> list[SniHit]:
-        """Probe all pending (ip, sni) pairs. Returns this run's hits."""
+            progress=None, batch_size: int = 10,
+            on_result=None) -> list[SniHit]:
+        """Probe all pending (ip, sni) pairs. Returns this run's hits.
+
+        ``on_result(SniHit)`` fires as each pair completes."""
         frag_t = parse_frag(frag)
         self.port = port or self.port or "443"
         new: list[SniHit] = []
@@ -222,6 +225,11 @@ class SniSearch:
                     continue  # unscanned — stays pending
                 self.results[item] = hit
                 new.append(hit)
+                if on_result:
+                    try:
+                        on_result(hit)
+                    except Exception:
+                        log.exception("on_result callback failed")
                 if item in self.pending:
                     self.pending.remove(item)
                 done += 1

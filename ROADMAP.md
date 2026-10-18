@@ -68,8 +68,12 @@ See `docs/engine-api.md`.
   Verified offline with fakes in Python tests and, in the browser, against a
   closed local port; live WARP registration/scan and a real alive-host scan
   are not exercised by CI.
-- ⬜ Step 4: packaging (PyInstaller engine + electron-builder) and release
-  workflow.
+- 🟡 Step 4: packaging. Written: engine resolver (`electron/engine-path.js`),
+  electron-builder config, PyInstaller one-folder engine, release workflow
+  `desktop` job (Windows installer, Linux AppImage, checksums, optional GPG),
+  `tools/smoke_engine.py` gate, `tools/check_version.py`; see
+  `docs/packaging.md`. **Not yet run**: the first `workflow_dispatch`/tag
+  build is the real test; unsigned installers; no lock file yet.
 - ⬜ Step 5: retire the Tk GUI once the Electron app has feature parity.
 
 ---

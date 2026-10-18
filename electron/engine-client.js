@@ -7,9 +7,11 @@ const { EventEmitter } = require('node:events');
 const readline = require('node:readline');
 
 class EngineClient extends EventEmitter {
-  constructor({ python = process.env.XRAY_FORGE_PYTHON || 'python3', cwd, env } = {}) {
+  // `command`/`args` come from resolveEngine(); `python` is kept for older callers.
+  constructor({ command, args, python = process.env.XRAY_FORGE_PYTHON || 'python3', cwd, env } = {}) {
     super();
-    this.python = python;
+    this.command = command || python;
+    this.args = args || ['-m', 'xray_forge', 'serve'];
     this.cwd = cwd;
     this.env = { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8', ...env };
     this.nextId = 1;
@@ -21,7 +23,7 @@ class EngineClient extends EventEmitter {
   start() {
     if (this.proc) return;
     this.exited = new Promise((resolve) => { this._resolveExit = resolve; });
-    this.proc = spawn(this.python, ['-m', 'xray_forge', 'serve'], {
+    this.proc = spawn(this.command, this.args, {
       cwd: this.cwd, env: this.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
     });
     readline.createInterface({ input: this.proc.stdout }).on('line', (l) => this._onLine(l));

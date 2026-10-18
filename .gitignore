@@ -90,4 +90,6 @@ xray.log
 
 # Electron UI
 node_modules/
-electron/out/
+electron/release/
+electron/engine-dist/
+out/

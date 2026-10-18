@@ -2,10 +2,15 @@
 const path = require('node:path');
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const { EngineClient } = require('./engine-client');
+const { resolveEngine } = require('./engine-path');
 
 const repoRoot = path.resolve(__dirname, '..');
-// When packaged, the frozen engine sits next to the app (see ROADMAP step 4).
-const engine = new EngineClient({ cwd: repoRoot });
+// Packaged: the PyInstaller engine bundle in <resources>/engine; dev: python -m xray_forge.
+const spec = resolveEngine({
+  resourcesPath: app.isPackaged ? process.resourcesPath : undefined, repoRoot,
+});
+console.log(`[engine] ${spec.kind}: ${spec.command} ${spec.args.join(' ')}`);
+const engine = new EngineClient(spec);
 let win = null;
 
 function createWindow() {

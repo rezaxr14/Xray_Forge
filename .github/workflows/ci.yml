@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, "feat/**" ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -126,10 +126,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt cryptography
 
-      - name: Install Playwright (Electron itself is not needed for the e2e tests)
+      - name: Install UI dependencies and Playwright
         working-directory: electron
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"   # the e2e tests use Chromium, not Electron
         run: |
-          npm install --no-save --no-package-lock playwright@1.56.0
+          npm ci
+          npm install --no-save playwright@1.56.0
           npx playwright install --with-deps chromium
 
       - name: Syntax check

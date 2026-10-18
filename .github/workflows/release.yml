@@ -184,8 +184,14 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"   # unsigned unless you add signing
         run: |
-          # the tag check above guarantees tag == package version on releases
-          version="$(python -c 'import xray_forge; print(xray_forge.__version__)')"
+          # read from files, independent of the working directory; on a tag the
+          # check above guarantees its X.Y.Z core equals the package version
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(python ../tools/check_version.py --package)"
+          fi
+          echo "installer version: $version"
           npx electron-builder --publish never -c.extraMetadata.version="$version"
           ls -la release
 
@@ -241,6 +247,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          # v2.1.0-rc1 style tags are published as pre-releases
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             dist/*.zip
             dist/*.exe

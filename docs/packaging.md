@@ -34,22 +34,34 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`:
 `build` (CLI zips, as before) and `desktop` (Windows installer + Linux
 AppImage) must both pass before `release` attaches everything, with SHA-256
 files and, when `GPG_PRIVATE_KEY` is configured, detached signatures.
-The tag must equal `xray_forge.__version__` and `pyproject.toml`
-(`tools/check_version.py`); the installer takes its version from the package.
 
-## Not verified yet (needs a real run on CI or your machine)
+Tags: `vX.Y.Z` must equal `xray_forge.__version__` and `pyproject.toml`
+(`tools/check_version.py`). To rehearse without bumping the version, push
+`vX.Y.Z-rc1` (also `-betaN`, `-alphaN`): the core must still match, and the
+GitHub release is created as a *pre-release*. Installers take their version
+from the tag (or from the package files when run from a branch).
 
-- The PyInstaller build and the electron-builder run have never been executed
-  by the author of this change: the sandbox it was written in cannot reach
-  PyPI/npm. First tag push (or `workflow_dispatch`) is the real test; start
-  with a throw-away tag such as `v2.1.0-rc1` on a branch whose version matches.
-- `electron/package-lock.json` does not exist yet. Run `npm install` once in
-  `electron/` and commit the lock file, then switch the workflow to `npm ci`.
+Manual runs: `workflow_dispatch` only works once `release.yml` exists on the
+**default branch**; the run uses the workflow file of the ref you dispatch on,
+so keep both copies in sync until the feature branch is merged.
+
+## Status
+
+Verified on real runners (run 39136895263, head 8efd63e): CLI build and
+desktop build on Windows and Linux are green; artifacts were a 88 MB Windows
+installer and a 130 MB Linux AppImage. Three bugs only a real run exposed
+(missing pytest, version read from the wrong directory, no `zip` on Windows)
+are fixed; `tools/check_version.py --package` now reads the version from files.
+
+## Still open
+
 - Windows installers are **unsigned**: SmartScreen will warn. Code signing
-  needs a certificate (`CSC_LINK`, `CSC_KEY_PASSWORD`) and is out of scope here.
+  needs a certificate (`CSC_LINK`, `CSC_KEY_PASSWORD`).
 - Linux AppImage: some distributions disable unprivileged user namespaces,
   which Chromium's sandbox needs; the app then needs `--no-sandbox`.
 - macOS is not built (no macOS engine testing).
 - Default Electron icon; add `build/icon.png` (512x512) and `build/icon.ico`.
 - The engine keeps its data in `~/.xray_forge` (accounts, sessions, logs).
   Uninstalling the app does not remove it.
+- The installers have not been launched by a human yet; CI only proves they
+  build and that the bundled engine answers the smoke test.

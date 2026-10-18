@@ -31,6 +31,27 @@ def test_check_version_rejects_other_tag():
     assert len(errs) == 2 and all("9.9.9" in e for e in errs)
 
 
+def test_check_version_allows_prerelease_suffixes():
+    cv = _load("check_version")
+    for tag in (f"v{__version__}-rc1", f"v{__version__}-beta2", f"v{__version__}-alpha.3"):
+        assert cv.check(tag) == [], tag
+        assert cv.is_prerelease(tag)
+    assert not cv.is_prerelease(f"v{__version__}")
+
+
+def test_check_version_rejects_malformed_or_mismatched_prerelease():
+    cv = _load("check_version")
+    for tag in ("v2.1", "latest", f"v{__version__}-final", f"v{__version__}rc1",
+                "v9.9.9-rc1", f"v{__version__}-rc"):
+        assert cv.check(tag), tag
+
+
+def test_package_flag_prints_version_without_importing():
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "check_version.py"), "--package"],
+                       capture_output=True, text=True, cwd="/")
+    assert r.returncode == 0 and r.stdout.strip() == __version__
+
+
 def test_package_versions_agree():
     cv = _load("check_version")
     assert len(set(cv.versions().values())) == 1

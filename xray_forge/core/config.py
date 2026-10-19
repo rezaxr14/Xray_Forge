@@ -72,6 +72,9 @@ DEFAULT_FM = {
 }
 
 DEFAULT_TEMPLATE = "{id:02d}_{sub}_{path}"
+# Keys a naming template may use (``parser.make_namer`` provides each of them).
+TEMPLATE_KEYS = ("id", "sub", "path", "ip", "port", "host", "net", "sni",
+                 "proto", "old")
 PROXY_SCHEMES = {"vless", "trojan", "vmess", "ss"}
 # Transports xray-core understands (converter + editor reference these).
 TRANSPORTS = ["ws", "grpc", "httpupgrade", "tcp", "xhttp", "http2"]

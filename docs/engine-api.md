@@ -27,7 +27,9 @@ cancels everything and shuts the engine down.
 | `config.parse` | `line` | `{ok, outbound, supports:{core:bool}}` |
 | `config.parse_many` | `text` | list of the above |
 | `config.render` | `outbound` | `{uri, roundtrip_ok, supports}` (editor save) |
-| `config.convert` | `text`, options | `{lines, counts, removed}` |
+| `config.convert` | `text`, rules (below) | `{lines, counts, removed, names:[{name,line}]}` |
+| `config.check_override` | `ip`, `port` | `{ip: "ipv4"/"ipv6"/"domain"/""/null, port: true/false/null}`; live feedback for FORCE IP / PORT (`null` = invalid / empty) |
+| `config.tag_cc` | `items:[{line, cc}]` | `{items:[{line, name, changed}], tagged}`; appends `[CC]` to a name, idempotent, VMess-aware |
 | `config.export` | `lines`, `format` (`clash`/`singbox`/`sub`) | `{content, count}` |
 | `config.dedup` | `lines` | `{lines, removed}` |
 | `sub.list/add/remove/set_enabled/configs` | see code | source state |
@@ -45,6 +47,20 @@ cancels everything and shuts the engine down.
 | `mitm.generate_ca` / `mitm.ca_paths` | `cn`, `permitted_domains` | paths only; key material is never returned |
 | `mitm.guide` | `platform` | setup text |
 | `job.cancel` / `job.list` | `job` | bool / ids |
+
+### `config.convert` rules
+
+| Param | Default | Meaning |
+|---|---|---|
+| `fp`, `cs`, `fm` | engine defaults (`engine.info.defaults`) | values injected into each link; `fm` must be JSON when `want_fm` is on |
+| `want_fp`, `want_cs`, `want_fm` | `true` | what to inject; all `false` = the Tk GUI's "IP only" mode |
+| `tls_only` | `true` | when injecting, skip links whose `security` is not `tls` |
+| `rename`, `template`, `start` | `true`, default template, `1` | naming; keys are listed in `engine.info.template_keys`; `start` is 0..99999 |
+| `ip`, `port` | `""` | force one endpoint on every link (IPv4, IPv6 or domain; port 1..65535). Only the connect address changes: sni/host/path are untouched |
+| `dedup` | `false` | drop duplicates after conversion |
+
+Invalid values return `-32602`. `names` follows the output order after
+de-duplication; with `rename` off it reports each link's own `#name`.
 
 Errors use standard JSON-RPC codes; `-32602` for invalid params, `-32000` for
 a failure inside the engine (message is `Type: text`).

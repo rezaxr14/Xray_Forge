@@ -7,19 +7,21 @@ from __future__ import annotations
 import dataclasses
 import json
 import threading
+from collections import Counter
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from xray_forge import __version__
 from xray_forge.core import healthcheck as hc
 from xray_forge.core.config import (
-    DEFAULT_CS, DEFAULT_FM, DEFAULT_FP, DEFAULT_TEMPLATE,
+    DEFAULT_CS, DEFAULT_FM, DEFAULT_FP, DEFAULT_TEMPLATE, TEMPLATE_KEYS,
 )
 from xray_forge.core.cores import core_names, get_core
 from xray_forge.core.dedup import dedup_configs
 from xray_forge.core.models import Outbound
 from xray_forge.core.parser import (
-    convert_block, export_to_clash, export_to_singbox, export_to_sub,
-    parse_target,
+    classify_endpoint, convert_block, export_to_clash, export_to_singbox,
+    export_to_sub, parse_target, tag_name_with_cc, valid_port,
 )
 from xray_forge.core.protocols import handler_for, supported_schemes
 from xray_forge.core.sub_source import SourceManager
@@ -29,6 +31,52 @@ from xray_forge.engine.jobs import JobContext, JobManager
 from xray_forge.engine.rpc import Dispatcher, invalid_params
 
 MAX_LINES = 20000
+MAX_START = 99999
+
+
+def _opt_str(v: Any, what: str) -> str:
+    if v is None:
+        return ""
+    if not isinstance(v, (str, int)) or isinstance(v, bool):
+        raise invalid_params(f"{what} must be a string")
+    return str(v).strip()
+
+
+def _override_ip(v: Any) -> str:
+    ip = _opt_str(v, "ip")
+    if ip and classify_endpoint(ip) is None:
+        raise invalid_params("ip must be an IPv4/IPv6 address or a domain")
+    return ip
+
+
+def _override_port(v: Any) -> str:
+    port = _opt_str(v, "port")
+    if port and not valid_port(port):
+        raise invalid_params("port must be 1..65535")
+    return port
+
+
+def _start_id(v: Any) -> int:
+    if isinstance(v, bool):
+        raise invalid_params("start must be an integer")
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        raise invalid_params("start must be an integer") from None
+    if not 0 <= n <= MAX_START:
+        raise invalid_params(f"start must be 0..{MAX_START}")
+    return n
+
+
+def _mask_json(fm: str) -> str:
+    """The fm= value is injected into every link, so it must be real JSON."""
+    try:
+        parsed = json.loads(fm)
+    except ValueError:
+        raise invalid_params("fm must be valid JSON") from None
+    if not isinstance(parsed, (dict, list)):
+        raise invalid_params("fm must be a JSON object or array")
+    return fm
 
 
 def _outbound_dict(out: Outbound) -> dict:
@@ -85,7 +133,8 @@ def build(emit, sources: SourceManager | None = None
                 "schemes": sorted(supported_schemes()),
                 "cores": core_names(), "methods": d.names(),
                 "defaults": {"fp": DEFAULT_FP, "cs": DEFAULT_CS,
-                             "fm": DEFAULT_FM, "template": DEFAULT_TEMPLATE}}
+                             "fm": DEFAULT_FM, "template": DEFAULT_TEMPLATE},
+                "template_keys": list(TEMPLATE_KEYS)}
 
     # ------------------------------------------------------------- config
     @d.method("config.parse")
@@ -125,17 +174,71 @@ def build(emit, sources: SourceManager | None = None
                        rename: bool = True, tls_only: bool = True,
                        want_fp: bool = True, want_cs: bool = True,
                        want_fm: bool = True, dedup: bool = False) -> dict:
+        """Apply the converter rules.  ``ip``/``port`` force one endpoint on
+        every config; ``want_*`` choose what is injected (all false = the
+        Tk GUI's "IP only" mode).  ``names`` lists ``{name, line}`` for each
+        output link, in output order."""
         if not isinstance(text, str):
             raise invalid_params("text must be a string")
+        for what, val in (("fp", fp), ("cs", cs), ("template", template)):
+            if not isinstance(val, str):
+                raise invalid_params(f"{what} must be a string")
         if fm is None:
             fm = json.dumps(DEFAULT_FM, separators=(",", ":"))
+        if not isinstance(fm, str):
+            raise invalid_params("fm must be a string")
+        for what, val in (("rename", rename), ("tls_only", tls_only),
+                          ("want_fp", want_fp), ("want_cs", want_cs),
+                          ("want_fm", want_fm), ("dedup", dedup)):
+            if not isinstance(val, bool):
+                raise invalid_params(f"{what} must be true or false")
+        fp, cs, fm = fp.strip(), cs.strip(), fm.strip()
+        if want_fm and fm:
+            _mask_json(fm)
+        ip, port = _override_ip(ip), _override_port(port)
         lines, names, counts = convert_block(
-            text, fp, cs, fm, tls_only, rename, template, start, ip, port,
+            text, fp, cs, fm, tls_only, rename,
+            template.strip() or DEFAULT_TEMPLATE, _start_id(start), ip, port,
             want_fp, want_cs, want_fm)
         removed = 0
         if dedup:
             lines, removed = dedup_configs(lines)
-        return {"lines": lines, "counts": counts, "removed": removed}
+        left = Counter(lines)
+        kept: list[dict] = []
+        for name, line in names:
+            if left[line] > 0:
+                left[line] -= 1
+                if not rename:   # links keep their own #name; report that one
+                    name = unquote(urlsplit(line).fragment)
+                kept.append({"name": name, "line": line})
+        return {"lines": lines, "counts": counts, "removed": removed,
+                "names": kept}
+
+    @d.method("config.check_override")
+    def config_check_override(ip: str = "", port: str = "") -> dict:
+        """Classify a FORCE IP / FORCE PORT entry for live feedback.  ``ip``
+        is ``ipv4``/``ipv6``/``domain``, ``""`` when empty, ``None`` when
+        invalid; ``port`` is true/false, ``None`` when empty."""
+        ip, port = _opt_str(ip, "ip"), _opt_str(port, "port")
+        return {"ip": (classify_endpoint(ip) if ip else ""),
+                "port": (valid_port(port) if port else None)}
+
+    @d.method("config.tag_cc")
+    def config_tag_cc(items: list) -> dict:
+        """Append ``[CC]`` (exit country) to config names.  ``items`` is a
+        list of ``{line, cc}``; the result keeps the same order."""
+        if not isinstance(items, list) or len(items) > MAX_LINES:
+            raise invalid_params(f"items must be a list (max {MAX_LINES})")
+        res: list[dict] = []
+        tagged = 0
+        for it in items:
+            if (not isinstance(it, dict) or not isinstance(it.get("line"), str)
+                    or not isinstance(it.get("cc", ""), str)):
+                raise invalid_params("each item needs a string line and cc")
+            new, name, changed = tag_name_with_cc(it["line"], it.get("cc", ""))
+            tagged += changed
+            res.append({"line": new, "name": name, "changed": changed})
+        return {"items": res, "tagged": tagged}
 
     @d.method("config.export")
     def config_export(lines: list, format: str) -> dict:

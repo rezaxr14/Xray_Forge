@@ -84,8 +84,14 @@ See `docs/engine-api.md`.
     Verified by Python tests and Playwright e2e against the real engine; the
     `[CC]` button is e2e-tested with simulated rows because no proxy core runs
     in CI.
-  - ⬜ 5.2 Fuller config editor: reality/vmess/tls/xhttp extras,
-    allow_insecure, header_type, raw JSON view.
+  - ✅ 5.2 Fuller config editor: grouped form (basic / transport / security /
+    reality·vmess·cs) with xhttp mode, header_type, allowInsecure, reality
+    keys, VMess scy/alterId, SS method; fields that do not apply to the link
+    are greyed out and keep their value; raw JSON pane (form → JSON,
+    JSON → form via `config.from_json`); Copy link; unmodelled link params
+    (`extra_params`) survive every edit. Payloads are now validated by the
+    engine. Also fixed: the 5.1 copy fallback used an inline style that the
+    renderer CSP blocks (now covered by a test).
   - ⬜ 5.3 IP-finder extras: `net.resolve`, `net.geo` / my-IP, copy IP, use as
     FORCE IP.
   - ⬜ 5.4 Subscriptions: best-N export, check-all-sources.

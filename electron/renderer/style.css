@@ -46,9 +46,16 @@ tr.bad td:nth-child(2) { color: var(--bad); }
 .chip.ok { color: var(--ok); border-color: var(--ok); }
 .chip.fail { color: var(--bad); border-color: var(--bad); }
 progress { width: 260px; }
-#ed-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+aside#editor { width: 440px; }
+#ed-form { margin-bottom: 8px; }
+#ed-form fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 8px; }
+#ed-form legend { grid-column: 1 / -1; }
 #ed-form .wide { grid-column: 1 / -1; }
-#ed-form input, #ed-form select { width: 100%; }
+#ed-form input[type=text], #ed-form select { width: 100%; }
+#ed-form label:has(input[type=checkbox]) { flex-direction: row; align-items: center; gap: 6px; color: var(--text); }
+#ed-form label.off { opacity: .45; }
+#ed-raw { margin-top: 10px; }
+#ed-raw summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 @media (max-width: 900px) { .split { flex-direction: column; } aside { width: 100%; } }
 .bad-text { color: var(--bad); }
 fieldset { border: 1px solid var(--line); border-radius: 8px; display: flex; gap: 14px; padding: 6px 12px; }

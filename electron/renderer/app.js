@@ -69,17 +69,48 @@ document.querySelectorAll('nav [role=tab]').forEach((btn) => {
 });
 
 // --------------------------------------------------------------- configs
-const EDIT_FIELDS = [
-  ['name', 'Name', 'text', 'wide'], ['host', 'Host', 'text'], ['port', 'Port', 'text'],
-  ['credential', 'ID / password', 'text', 'wide'],
-  ['transport', 'Transport', ['tcp', 'ws', 'grpc', 'httpupgrade', 'xhttp', 'kcp']],
-  ['security', 'Security', ['', 'none', 'tls', 'reality']],
-  ['sni', 'SNI', 'text'], ['host_header', 'Host header', 'text'],
-  ['path', 'Path', 'text'], ['fingerprint', 'Fingerprint', 'text'],
-  ['alpn', 'ALPN', 'text'], ['flow', 'Flow', 'text'],
-  ['public_key', 'Reality public key', 'text', 'wide'], ['short_id', 'Reality short id', 'text'],
-  ['service_name', 'gRPC service', 'text'],
+// Editor layout.  kind: text | select | check; `at` puts the value somewhere
+// other than the top level of the outbound (extra.mode / extra.cs).
+// `when(o, form)` says whether the field applies to this link; fields that do
+// not apply are greyed out and keep the value the link already had.
+const SECURITY_REALITY = (o, f) => (f.security || '').toLowerCase() === 'reality';
+const EDIT_SECTIONS = [
+  ['Basic', [
+    { key: 'scheme', label: 'Protocol', kind: 'readonly' },
+    { key: 'name', label: 'Name', kind: 'text', wide: true },
+    { key: 'host', label: 'Address', kind: 'text' },
+    { key: 'port', label: 'Port', kind: 'text' },
+    { key: 'credential', label: 'ID / password', kind: 'text', wide: true },
+    { key: 'ss_method', label: 'SS method', kind: 'text', when: (o) => o.scheme === 'ss' },
+  ]],
+  ['Transport', [
+    { key: 'transport', label: 'Type', kind: 'select', options: 'transports' },
+    { key: 'path', label: 'Path', kind: 'text' },
+    { key: 'host_header', label: 'Host header', kind: 'text' },
+    { key: 'service_name', label: 'gRPC serviceName', kind: 'text' },
+    { key: 'header_type', label: 'Header type', kind: 'text' },
+    { key: 'mode', at: 'extra', label: 'xhttp mode', kind: 'select', options: 'xhttp_modes',
+      when: (o, f) => (f.transport || '') === 'xhttp' },
+  ]],
+  ['Security', [
+    { key: 'security', label: 'Security', kind: 'select', options: 'securities' },
+    { key: 'sni', label: 'SNI', kind: 'text' },
+    { key: 'fingerprint', label: 'Fingerprint', kind: 'text' },
+    { key: 'alpn', label: 'ALPN', kind: 'text' },
+    { key: 'allow_insecure', label: 'allowInsecure (skip certificate check)', kind: 'check', wide: true },
+  ]],
+  ['Reality · VMess · cipher suites', [
+    { key: 'flow', label: 'Flow', kind: 'select', options: 'flows' },
+    { key: 'public_key', label: 'Reality public key (pbk)', kind: 'text', wide: true, when: SECURITY_REALITY },
+    { key: 'short_id', label: 'Reality short id (sid)', kind: 'text', when: SECURITY_REALITY },
+    { key: 'spider_x', label: 'Reality spiderX (spx)', kind: 'text', when: SECURITY_REALITY },
+    { key: 'cs', at: 'extra', label: 'Cipher suites (cs)', kind: 'text', wide: true },
+    { key: 'encryption', label: 'VMess scy', kind: 'text', when: (o) => o.scheme === 'vmess' },
+    { key: 'alter_id', label: 'VMess alterId', kind: 'text', when: (o) => o.scheme === 'vmess' },
+  ]],
 ];
+const EDIT_FIELDS = EDIT_SECTIONS.flatMap(([, fields]) => fields);
+const ed = { base: null };
 
 function renderConfigs() {
   const body = $('#cfg-table tbody');
@@ -101,22 +132,85 @@ function renderConfigs() {
   $('#cfg-count').textContent = `${ok} valid / ${state.configs.length} total`;
 }
 
+const fieldEl = (key) => $('#ed-form').elements[key];
+
+function fieldValue(f, o) {
+  const src = f.at ? (o[f.at] || {}) : o;
+  const v = src[f.key];
+  return f.kind === 'check' ? !!v : (v == null ? '' : String(v));
+}
+
+// Current form -> outbound.  Starts from the loaded outbound so everything the
+// form has no field for (extra, extra_params, ...) survives the round trip.
+function collectOutbound() {
+  const o = JSON.parse(JSON.stringify(ed.base));
+  const form = {};
+  for (const f of EDIT_FIELDS) {
+    const el = fieldEl(f.key);
+    if (el) form[f.key] = f.kind === 'check' ? el.checked : el.value.trim();
+  }
+  for (const f of EDIT_FIELDS) {
+    const el = fieldEl(f.key);
+    if (!el || f.kind === 'readonly' || el.disabled) continue;   // not applicable: keep as loaded
+    const val = form[f.key];
+    if (f.at) {
+      o[f.at] = o[f.at] || {};
+      if (val) o[f.at][f.key] = val; else delete o[f.at][f.key];
+    } else o[f.key] = val;
+  }
+  if (!o.port) o.port = '443';
+  if (!o.path) o.path = '/';
+  if (!o.transport) o.transport = 'tcp';
+  return o;
+}
+
+// Grey out fields that do not apply to the link as currently edited.
+function syncEditor() {
+  const form = {};
+  for (const f of EDIT_FIELDS) { const el = fieldEl(f.key); if (el) form[f.key] = f.kind === 'check' ? el.checked : el.value.trim(); }
+  const o = { ...ed.base, ...form };
+  for (const f of EDIT_FIELDS) {
+    if (!f.when) continue;
+    const el = fieldEl(f.key);
+    const on = !!f.when(o, form);
+    el.disabled = !on;
+    el.closest('label').classList.toggle('off', !on);
+  }
+}
+
+function buildEditor() {
+  const info = (state.info && state.info.editor) || {};
+  const o = ed.base;
+  $('#ed-form').replaceChildren(...EDIT_SECTIONS.map(([title, fields]) =>
+    h('fieldset', {}, h('legend', {}, title), ...fields.map((f) => {
+      const val = fieldValue(f, o);
+      let input;
+      if (f.kind === 'select') {
+        const opts = [...(info[f.options] || [])];
+        if (!opts.includes(val)) opts.push(val);          // keep unusual values editable
+        input = h('select', { name: f.key }, opts.map((x) => h('option', { value: x, selected: x === val }, x || '(none)')));
+      } else if (f.kind === 'check') {
+        input = h('input', { type: 'checkbox', name: f.key, checked: val });
+      } else {
+        input = h('input', { type: 'text', name: f.key, value: val, readonly: f.kind === 'readonly' });
+      }
+      input.addEventListener('input', syncEditor);
+      input.addEventListener('change', syncEditor);
+      return h('label', { class: f.wide ? 'wide' : '' }, f.kind === 'check' ? [input, f.label] : [f.label, input]);
+    }))));
+  syncEditor();
+  $('#ed-json').value = JSON.stringify(o, null, 2);
+}
+
 function selectConfig(i) {
   state.selected = i;
   const c = state.configs[i];
   renderConfigs();
-  const ed = $('#editor');
-  if (!c || !c.ok) { ed.hidden = true; return; }
-  ed.hidden = false;
-  const form = $('#ed-form');
-  form.replaceChildren(...EDIT_FIELDS.map(([key, label, kind, cls]) => {
-    const val = c.outbound[key] ?? '';
-    const input = Array.isArray(kind)
-      ? h('select', { name: key }, kind.map((o) => h('option', { value: o, selected: o === val }, o || '(none)')))
-      : h('input', { name: key, type: 'text', value: val });
-    if (Array.isArray(kind) && !kind.includes(val)) input.append(h('option', { value: val, selected: true }, val));
-    return h('label', { class: cls || '' }, label, input);
-  }));
+  const edBox = $('#editor');
+  if (!c || !c.ok) { edBox.hidden = true; return; }
+  edBox.hidden = false;
+  ed.base = c.outbound;
+  buildEditor();
   $('#ed-uri').value = c.line;
   say($('#ed-msg'), '');
 }
@@ -147,15 +241,32 @@ $('#cfg-dedup').addEventListener('click', () => guarded($('#cfg-count'), async (
 $('#ed-apply').addEventListener('click', () => guarded($('#ed-msg'), async () => {
   const c = state.configs[state.selected];
   if (!c) return;
-  const outbound = { ...c.outbound };
-  for (const el of $('#ed-form').elements) if (el.name) outbound[el.name] = el.value;
-  const r = await window.forge.call('config.render', { outbound });
+  const r = await window.forge.call('config.render', { outbound: collectOutbound() });
   const parsed = await window.forge.call('config.parse', { line: r.uri });
   state.configs[state.selected] = parsed;
   $('#cfg-input').value = state.configs.map((x) => x.line).join('\n');
   $('#ed-uri').value = r.uri;
   renderConfigs();
+  if (parsed.ok) { ed.base = parsed.outbound; buildEditor(); }
   say($('#ed-msg'), r.roundtrip_ok ? 'Applied' : 'Applied, but the new link does not re-parse', !r.roundtrip_ok);
+}));
+
+$('#ed-copy').addEventListener('click', () => guarded($('#ed-msg'), async () => {
+  const r = await window.forge.call('config.render', { outbound: collectOutbound() });
+  $('#ed-uri').value = r.uri;
+  await copyText(r.uri, $('#ed-msg'), 'link');
+}));
+
+$('#ed-to-json').addEventListener('click', () => guarded($('#ed-msg'), async () => {
+  $('#ed-json').value = JSON.stringify(collectOutbound(), null, 2);
+  say($('#ed-msg'), 'form → JSON');
+}));
+
+$('#ed-from-json').addEventListener('click', () => guarded($('#ed-msg'), async () => {
+  const r = await window.forge.call('config.from_json', { text: $('#ed-json').value });
+  ed.base = r.outbound;
+  buildEditor();
+  say($('#ed-msg'), 'JSON → form (press Apply to write the link)');
 }));
 
 $('#export-run').addEventListener('click', () => guarded($('#export-out'), async () => {
@@ -173,7 +284,9 @@ async function copyText(text, msgEl, what) {
     say(msgEl, `${what} copied`);
   } catch {
     // Fallback for contexts without the async clipboard API.
-    const ta = h('textarea', { 'aria-hidden': 'true', style: 'position:fixed;left:-9999px' });
+    const ta = h('textarea', { 'aria-hidden': 'true' });
+    ta.style.position = 'fixed';        // CSSOM, not a style attribute: the CSP forbids inline styles
+    ta.style.left = '-9999px';
     ta.value = text;
     document.body.append(ta);
     ta.select();

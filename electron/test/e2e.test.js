@@ -454,3 +454,144 @@ test('health: Tag names [CC] uses the exit country reported by a core', opts, as
     assert.deepEqual(problems, []);
   } finally { await close(); }
 });
+
+// ------------------------------------------------------------ step 5.2
+const XHTTP = 'vless://13b8ac3f-e8de-4b2d-82db-e9130d288a54@198.51.100.4:443?security=tls&sni=a.example&type=xhttp&mode=packet-up&path=%2Fp&host=a.example&ech=AEX_abc#xh';
+const VMESS = 'vmess://' + Buffer.from(JSON.stringify({ v: '2', ps: 'vm', add: '203.0.113.9', port: '443', id: 'b831381d-6324-4d53-ad4f-8cda48b30811', aid: '0', scy: 'auto', net: 'ws', host: 'c.example', path: '/v', tls: 'tls', sni: 'c.example' })).toString('base64');
+
+async function openEditor(page, line, row = 1) {
+  await page.fill('#cfg-input', line);
+  await page.click('#cfg-parse');
+  await page.waitForSelector(`#cfg-table tbody tr:nth-child(${row})`);
+  await page.click(`#cfg-table tbody tr:nth-child(${row})`);
+  await page.waitForSelector('#editor:not([hidden])');
+}
+
+test('editor: reality/xhttp/allowInsecure/header fields, applicability and extra_params', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.waitForFunction(() => /engine v\d/.test(document.querySelector('#engine-status').textContent));
+    await openEditor(page, XHTTP);
+    // xhttp link: mode enabled, reality + vmess fields greyed out
+    assert.equal(await page.inputValue('#ed-form [name=mode]'), 'packet-up');
+    assert.equal(await page.isDisabled('#ed-form [name=mode]'), false);
+    assert.equal(await page.isDisabled('#ed-form [name=public_key]'), true);
+    assert.equal(await page.isDisabled('#ed-form [name=alter_id]'), true);
+    assert.equal(await page.isDisabled('#ed-form [name=ss_method]'), true);
+
+    // changing transport greys the xhttp mode; switching to reality enables the keys
+    await page.selectOption('#ed-form [name=transport]', 'ws');
+    assert.equal(await page.isDisabled('#ed-form [name=mode]'), true);
+    await page.selectOption('#ed-form [name=transport]', 'xhttp');
+    await page.selectOption('#ed-form [name=security]', 'reality');
+    assert.equal(await page.isDisabled('#ed-form [name=public_key]'), false);
+
+    await page.selectOption('#ed-form [name=mode]', 'stream-up');
+    await page.fill('#ed-form [name=public_key]', 'PBK123');
+    await page.fill('#ed-form [name=short_id]', 'ab12');
+    await page.fill('#ed-form [name=spider_x]', '/spx');
+    await page.fill('#ed-form [name=header_type]', 'http');
+    await page.fill('#ed-form [name=cs]', 'TLS_AES_128_GCM_SHA256');
+    await page.check('#ed-form [name=allow_insecure]');
+    await page.click('#ed-apply');
+    await page.waitForFunction(() => document.querySelector('#ed-msg').textContent === 'Applied');
+    const uri = await page.inputValue('#ed-uri');
+    for (const part of ['mode=stream-up', 'pbk=PBK123', 'sid=ab12', 'spx=%2Fspx', 'headerType=http',
+      'cs=TLS_AES_128_GCM_SHA256', 'allowInsecure=1', 'security=reality', 'ech=AEX_abc']) {
+      assert.ok(uri.includes(part), `${part} missing from ${uri}`);
+    }
+    // the form reloads from the applied link
+    assert.equal(await page.inputValue('#ed-form [name=public_key]'), 'PBK123');
+    assert.equal(await page.isChecked('#ed-form [name=allow_insecure]'), true);
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('editor: VMess scy/alterId and untouched disabled fields keep their values', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.waitForFunction(() => /engine v\d/.test(document.querySelector('#engine-status').textContent));
+    await openEditor(page, VMESS);
+    assert.equal(await page.isDisabled('#ed-form [name=alter_id]'), false);
+    assert.equal(await page.inputValue('#ed-form [name=encryption]'), 'auto');
+    await page.fill('#ed-form [name=encryption]', 'aes-128-gcm');
+    await page.fill('#ed-form [name=alter_id]', '4');
+    await page.click('#ed-apply');
+    await page.waitForFunction(() => document.querySelector('#ed-msg').textContent === 'Applied');
+    const decoded = JSON.parse(Buffer.from((await page.inputValue('#ed-uri')).replace('vmess://', ''), 'base64').toString());
+    assert.equal(decoded.scy, 'aes-128-gcm');
+    assert.equal(decoded.aid, '4');
+    assert.equal(decoded.add, '203.0.113.9');
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('editor: raw JSON round trip, validation errors and Copy link', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.waitForFunction(() => /engine v\d/.test(document.querySelector('#engine-status').textContent));
+    await page.evaluate(() => {
+      window.__clip = [];
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (t) => { window.__clip.push(t); } }, configurable: true });
+    });
+    await openEditor(page, XHTTP);
+    await page.click('#ed-raw summary');
+    const json = JSON.parse(await page.inputValue('#ed-json'));
+    assert.equal(json.extra_params.ech, 'AEX_abc');
+    assert.equal(json.extra.mode, 'packet-up');
+    assert.ok(!('raw' in json) || json.raw === '' || typeof json.raw === 'string');
+
+    // form -> JSON picks up form edits
+    await page.fill('#ed-form [name=name]', 'from-form');
+    await page.click('#ed-to-json');
+    assert.equal(JSON.parse(await page.inputValue('#ed-json')).name, 'from-form');
+
+    // JSON -> form: edit extra_params and the port as an integer
+    json.port = 2053;
+    json.name = 'from-json';
+    json.extra_params.pcs = 'deadbeef';
+    await page.fill('#ed-json', JSON.stringify(json));
+    await page.click('#ed-from-json');
+    await page.waitForFunction(() => /JSON → form/.test(document.querySelector('#ed-msg').textContent));
+    assert.equal(await page.inputValue('#ed-form [name=port]'), '2053');
+    assert.equal(await page.inputValue('#ed-form [name=name]'), 'from-json');
+    await page.click('#ed-copy');
+    await page.waitForFunction(() => window.__clip.length === 1);
+    const link = await page.evaluate(() => window.__clip[0]);
+    assert.match(link, /@198\.51\.100\.4:2053\?/);
+    assert.ok(link.includes('pcs=deadbeef') && link.includes('ech=AEX_abc'));
+    assert.equal(await page.inputValue('#ed-uri'), link);
+    // Copy link does not apply: the table keeps the old name until Apply
+    assert.match(await page.textContent('#cfg-table tbody tr:nth-child(1)'), /xh/);
+
+    // bad JSON / unknown field / bad port are reported and change nothing
+    for (const [text, re] of [['{oops', /bad JSON/], ['{"scheme":"vless","bogus":1}', /unknown outbound fields: bogus/],
+      ['{"scheme":"vless","port":"70000"}', /port must be 1\.\.65535/]]) {
+      await page.fill('#ed-json', text);
+      await page.click('#ed-from-json');
+      await page.waitForFunction((src) => new RegExp(src).test(document.querySelector('#ed-msg').textContent), re.source);
+      assert.equal(await page.inputValue('#ed-form [name=name]'), 'from-json');
+    }
+    // port typed into the form is validated by the engine on Apply
+    await page.fill('#ed-form [name=port]', '99999');
+    await page.click('#ed-apply');
+    await page.waitForFunction(() => /port must be/.test(document.querySelector('#ed-msg').textContent));
+    assert.match(await page.textContent('#cfg-table tbody tr:nth-child(1)'), /xh/);
+    assert.deepEqual(problems.filter((p) => !/status of 400|Failed to load resource/.test(p)), []);
+  } finally { await close(); }
+});
+
+test('copy falls back without the async clipboard API and the CSP stays quiet', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.click('[data-tab=convert]');
+    await page.fill('#cv-input', VLESS);
+    await page.click('#cv-run');
+    await page.waitForFunction(() => document.querySelector('#cv-output').value.length > 0);
+    await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true }));
+    await page.click('#cv-copy');
+    await page.waitForFunction(() => /output copied|copy failed/.test(document.querySelector('#cv-msg').textContent));
+    assert.equal(await page.locator('body > textarea').count(), 0);   // temp textarea removed again
+    assert.deepEqual(problems, []);                                  // no CSP violations
+  } finally { await close(); }
+});

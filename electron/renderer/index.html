@@ -48,11 +48,21 @@
         <aside id="editor" hidden>
           <h2>Edit config</h2>
           <form id="ed-form" autocomplete="off"></form>
+          <p class="muted small">Link parameters with no field here (ech, pcs, xhttp extra, …) are kept as they are; edit them under <code>extra_params</code> in the raw JSON.</p>
           <div class="row">
             <button id="ed-apply" class="primary" type="button">Apply</button>
+            <button id="ed-copy" type="button">Copy link</button>
             <span id="ed-msg" class="muted" role="status"></span>
           </div>
           <label>Share link <textarea id="ed-uri" rows="4" readonly spellcheck="false"></textarea></label>
+          <details id="ed-raw">
+            <summary>Raw JSON</summary>
+            <div class="row">
+              <button id="ed-to-json" type="button">Form → JSON</button>
+              <button id="ed-from-json" type="button">JSON → form</button>
+            </div>
+            <textarea id="ed-json" rows="14" spellcheck="false" aria-label="Outbound JSON"></textarea>
+          </details>
         </aside>
       </div>
       <div class="row">

@@ -11,9 +11,10 @@ import threading
 import time
 from typing import Any
 
-from xray_forge.core import domainfront, warp
+from xray_forge.core import domainfront, scanner, warp
 from xray_forge.core.config import MITM_DF_XRAY_MIN_VERSION
 from xray_forge.core.cores import get_core
+from xray_forge.core.parser import classify_endpoint
 from xray_forge.core.scan_session import ScanSession
 from xray_forge.core import settings as _settings
 from xray_forge.core.sni_search import (
@@ -54,6 +55,21 @@ def _str_list(v: Any, what: str) -> list[str]:
     return [x.strip() for x in v if x.strip()]
 
 
+def _endpoint(v: Any, what: str, allow_empty: bool = False) -> str:
+    """A validated IPv4 / IPv6 / domain.  The value ends up inside provider
+    URLs, so anything else (slashes, ``?``, spaces, ...) is refused."""
+    if not isinstance(v, str):
+        raise invalid_params(f"{what} must be a string")
+    v = v.strip()
+    if not v:
+        if allow_empty:
+            return ""
+        raise invalid_params(f"{what} must not be empty")
+    if classify_endpoint(v) is None:
+        raise invalid_params(f"{what} must be an IPv4/IPv6 address or a domain name")
+    return v
+
+
 def _export(session, fmt: str) -> dict:
     if fmt not in ("csv", "json"):
         raise invalid_params("format must be csv or json")
@@ -62,6 +78,33 @@ def _export(session, fmt: str) -> dict:
         (session.export_csv if fmt == "csv" else session.export_json)(path)
         with open(path, "r", encoding="utf-8") as f:
             return {"format": fmt, "content": f.read()}
+
+
+_reserved_names: set[tuple[str, str]] = set()
+_reserved_lock = threading.Lock()
+
+
+def _new_session_name(session: str | None, prefix: str, dirname: str) -> str:
+    """Name for a session that is about to be created.
+
+    An explicit name is validated and used as given (resuming depends on
+    that).  An automatic name is ``<prefix>_<timestamp>``, made unique against
+    the sessions on disk *and* those handed out by this process: the timestamp
+    only has one-second resolution, so two scans started within a second used
+    to share a session and the second one failed with a misleading
+    "no scannable IPs" error."""
+    if session:
+        return _session_name(session, prefix)
+    base = _session_name(None, prefix)
+    folder = os.path.join(_settings.data_dir(), dirname)   # looked up lazily (tests redirect it)
+    with _reserved_lock:
+        name, n = base, 1
+        while ((folder, name) in _reserved_names
+               or os.path.exists(os.path.join(folder, f"{name}.json"))):
+            n += 1
+            name = f"{base}_{n}"
+        _reserved_names.add((folder, name))
+        return name
 
 
 def _list_sessions(dirname: str, loader) -> list[dict]:
@@ -88,6 +131,27 @@ def _warp_status() -> dict:
 
 
 def register(d: Dispatcher, jobs: JobManager) -> None:
+    # ----------------------------------------------------------- IP finder
+    @d.method("net.resolve")
+    def net_resolve(host: str) -> dict:
+        """Resolve ``host`` through DoH, the Iranian UDP resolvers and the
+        system resolver and report which resolver returned which address
+        (a mismatch between them points at DNS hijacking)."""
+        host = _endpoint(host, "host")
+        if classify_endpoint(host) in ("ipv4", "ipv6"):
+            return {"host": host, "answers": [{"ip": host, "sources": ["literal"]}]}
+        found = scanner.resolve_dns_all(host)
+        return {"host": host, "answers": [{"ip": ip, "sources": sorted(srcs)}
+                                          for ip, srcs in found.items()]}
+
+    @d.method("net.geo")
+    def net_geo(ip: str = "") -> dict:
+        """Geo / ISP lookup of an IP or domain; empty = this machine's own
+        public IP.  ``ok`` is false when every provider failed."""
+        ip = _endpoint(ip, "ip", allow_empty=True)
+        text = scanner.geo_lookup(ip)
+        return {"query": ip, "text": text, "ok": text != scanner.GEO_FAILED}
+
     # ------------------------------------------------------------ IP scan
     @d.method("scan.run")
     def scan_run(cidrs: list, count: int = 200, port: str = "443",
@@ -103,7 +167,7 @@ def register(d: Dispatcher, jobs: JobManager) -> None:
         count = _int(count, 1, 5000, "count")
         workers = _int(workers, 1, 256, "workers")
         port = _port(port)
-        name = _session_name(session, "scan")
+        name = _new_session_name(session, "scan", "scans")
         sess = ScanSession(name)
         n = sess.set_targets(cidr_list, count, resume=bool(resume))
         if n == 0:
@@ -162,7 +226,7 @@ def register(d: Dispatcher, jobs: JobManager) -> None:
             raise invalid_params("too many (ip, sni) pairs")
         workers = _int(workers, 1, 256, "workers")
         port = _port(port)
-        name = _session_name(session, "sni")
+        name = _new_session_name(session, "sni", "sni_search")
         search = SniSearch(name)
         n = search.set_targets(ip_list, sni_list, port=port, resume=bool(resume))
 

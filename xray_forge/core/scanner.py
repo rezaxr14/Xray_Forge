@@ -207,6 +207,9 @@ def fmt_geo(d: Any) -> str:
     return s
 
 
+GEO_FAILED = "lookup failed (all providers blocked?)"
+
+
 def geo_lookup(ip: str = "") -> str:
     urls = [
         f"https://ipwho.is/{ip}".rstrip("/"),
@@ -227,7 +230,7 @@ def geo_lookup(ip: str = "") -> str:
             continue
         if txt and "failed" not in txt:
             return txt
-    return "lookup failed (all providers blocked?)"
+    return GEO_FAILED
 
 
 def sample_cidr(cidr: str, count: int) -> list[str]:

@@ -233,3 +233,62 @@ def test_mitm_guide_and_validation():
     assert "MITM-DomainFronting setup" in c.result("mitm.guide", platform="windows")["content"]
     assert c.call("mitm.guide", platform="beos")["error"]["code"] == -32602
     assert c.call("mitm.generate_ca", cn="")["error"]["code"] == -32602
+
+
+# ------------------------------------------- automatic session names (5.3)
+def _freeze_clock(monkeypatch):
+    from xray_forge.engine import scan_methods
+    monkeypatch.setattr(scan_methods.time, "strftime", lambda fmt, *a: "20260101_000000")
+
+
+def test_automatic_scan_names_never_collide_within_one_second(monkeypatch):
+    """Two scans started in the same second used to share one session, and
+    the second failed with 'no scannable IPs in the given ranges'."""
+    _fake_scan(monkeypatch)
+    _freeze_clock(monkeypatch)
+    c = Client()
+    first = c.result("scan.run", cidrs=["10.0.0.0/29"], count=4, workers=2)
+    c.wait_job(first["job"])
+    second = c.result("scan.run", cidrs=["10.0.0.0/29"], count=4, workers=2)
+    c.wait_job(second["job"])
+    assert first["session"] == "scan_20260101_000000"
+    assert second["session"] == "scan_20260101_000000_2"
+    assert second["targets"] == 4
+    assert [s["name"] for s in c.result("scan.sessions")] == [first["session"], second["session"]]
+
+
+def test_automatic_names_do_not_collide_when_requests_race(monkeypatch):
+    _fake_scan(monkeypatch)
+    _freeze_clock(monkeypatch)
+    c = Client()
+    a = c.result("scan.run", cidrs=["10.0.0.0/29"], count=4)    # neither job awaited
+    b = c.result("scan.run", cidrs=["10.0.0.0/29"], count=4)
+    assert a["session"] != b["session"]
+    c.wait_job(a["job"])
+    c.wait_job(b["job"])
+
+
+def test_explicit_session_names_are_used_as_given(monkeypatch):
+    _fake_scan(monkeypatch)
+    _freeze_clock(monkeypatch)
+    c = Client()
+    r = c.result("scan.run", cidrs=["10.0.0.0/29"], count=4, session="mine")
+    c.wait_job(r["job"])
+    assert r["session"] == "mine"
+    again = c.result("scan.run", cidrs=["10.0.0.0/29"], count=4, session="mine")
+    assert again["session"] == "mine"            # explicit names keep their meaning (resume)
+    c.wait_job(again["job"])
+
+
+def test_automatic_sni_names_never_collide_within_one_second(monkeypatch):
+    _freeze_clock(monkeypatch)
+    monkeypatch.setattr(
+        SniSearch, "probe",
+        lambda self, ip, sni, port="443", frag=None, timeout=5.0, http_check=True, stop=None:
+        SniHit(ip=ip, port=port, sni=sni, ok=False, info="stubbed"))
+    c = Client()
+    a = c.result("sni.run", ips=["10.0.0.1"], snis=["a.example"], http_check=False)
+    c.wait_job(a["job"])
+    b = c.result("sni.run", ips=["10.0.0.1"], snis=["a.example"], http_check=False)
+    c.wait_job(b["job"])
+    assert (a["session"], b["session"]) == ("sni_20260101_000000", "sni_20260101_000000_2")

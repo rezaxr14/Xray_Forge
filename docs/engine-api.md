@@ -40,6 +40,8 @@ cancels everything and shuts the engine down.
 | `scan.sessions` / `scan.get` / `scan.export` | `session`, `format` (`csv`/`json`) | saved scan data |
 | `sni.run` | `ips`, `snis`, `presets`, `from_scan`, `port`, `workers`, `frag`, `timeout`, `http_check`, `session`, `resume` | `{job, session, pairs}`; items are hits |
 | `sni.presets` / `sni.sessions` / `sni.get` / `sni.export` | – / `session` | saved SNI data |
+| `net.resolve` | `host` (domain; an IP literal is echoed back) | `{host, answers:[{ip, sources:[...]}]}`; DoH, Iranian UDP resolvers and system DNS, so disagreeing answers reveal tampering. Blocking (several seconds): requests run concurrently, so other calls are not held up |
+| `net.geo` | `ip` (IPv4/IPv6/domain; empty = this machine's public IP) | `{query, text, ok}`; `ok` is false when every provider failed. The value is validated because it is placed in provider URLs |
 | `warp.status` | – | `{registered, device_id (12 chars), endpoint, ipv4, ipv6}`; never returns keys or tokens |
 | `warp.register` | – | status; talks to Cloudflare, saved 0600 |
 | `warp.config` | `endpoint`, `format` (`xray`/`singbox`/`mihomo`) | outbound JSON snippet (contains the WireGuard key: it is the user's own config) |
@@ -65,5 +67,9 @@ de-duplication; with `rename` off it reports each link's own `#name`.
 
 Errors use standard JSON-RPC codes; `-32602` for invalid params, `-32000` for
 a failure inside the engine (message is `Type: text`).
+When `scan.run` / `sni.run` get no `session`, the engine names it
+`scan_<timestamp>` / `sni_<timestamp>` and appends `_2`, `_3`, ... if that name
+is already taken, so two runs started in the same second never share a session.
+An explicit `session` is used as given (that is how `resume` finds it).
 Session names (`session`) are restricted to `[A-Za-z0-9_.-]`, max 64
 characters, so a client cannot address files outside the data directory.

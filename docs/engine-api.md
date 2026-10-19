@@ -23,10 +23,11 @@ cancels everything and shuts the engine down.
 
 | Method | Params | Result |
 |---|---|---|
-| `engine.info` | – | version, protocol, schemes, cores, methods, defaults |
+| `engine.info` | – | version, protocol, schemes, cores, methods, defaults, template_keys, editor (`transports`, `flows`, `securities`, `xhttp_modes`) |
 | `config.parse` | `line` | `{ok, outbound, supports:{core:bool}}` |
 | `config.parse_many` | `text` | list of the above |
-| `config.render` | `outbound` | `{uri, roundtrip_ok, supports}` (editor save) |
+| `config.render` | `outbound` | `{uri, roundtrip_ok, supports}` (editor save). The payload is validated: unknown fields, wrongly-typed values and ports outside 1..65535 are `-32602`; `port` / `alter_id` may be integers; `raw` is ignored |
+| `config.from_json` | `text` | `{outbound, supports}`: the raw-JSON editor's JSON -> form step, same validation as `config.render` plus `bad JSON: ...` |
 | `config.convert` | `text`, rules (below) | `{lines, counts, removed, names:[{name,line}]}` |
 | `config.check_override` | `ip`, `port` | `{ip: "ipv4"/"ipv6"/"domain"/""/null, port: true/false/null}`; live feedback for FORCE IP / PORT (`null` = invalid / empty) |
 | `config.tag_cc` | `items:[{line, cc}]` | `{items:[{line, name, changed}], tagged}`; appends `[CC]` to a name, idempotent, VMess-aware |

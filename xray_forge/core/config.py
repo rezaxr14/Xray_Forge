@@ -80,6 +80,9 @@ PROXY_SCHEMES = {"vless", "trojan", "vmess", "ss"}
 TRANSPORTS = ["ws", "grpc", "httpupgrade", "tcp", "xhttp", "http2"]
 # xtls flow presets (vision required for REALITY on xray)
 FLOWS = ["", "xtls-rprx-vision"]
+# Editor option lists (the Electron editor reads them from engine.info).
+SECURITIES = ["", "none", "tls", "reality"]
+XHTTP_MODES = ["", "auto", "packet-up", "stream-up", "stream-one"]
 
 IPV4_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 

@@ -14,7 +14,8 @@ from urllib.parse import unquote, urlsplit
 from xray_forge import __version__
 from xray_forge.core import healthcheck as hc
 from xray_forge.core.config import (
-    DEFAULT_CS, DEFAULT_FM, DEFAULT_FP, DEFAULT_TEMPLATE, TEMPLATE_KEYS,
+    DEFAULT_CS, DEFAULT_FM, DEFAULT_FP, DEFAULT_TEMPLATE, FLOWS, SECURITIES,
+    TEMPLATE_KEYS, TRANSPORTS, XHTTP_MODES,
 )
 from xray_forge.core.cores import core_names, get_core
 from xray_forge.core.dedup import dedup_configs
@@ -111,6 +112,52 @@ def _describe(line: str) -> dict:
     return {"line": line, "ok": True, "outbound": _outbound_dict(out),
             "supports": _core_support(out)}
 
+_OUT_STR_FIELDS = (
+    "scheme", "name", "host", "port", "credential", "transport", "security",
+    "sni", "host_header", "path", "fingerprint", "alpn", "service_name",
+    "header_type", "public_key", "short_id", "spider_x", "flow", "ss_method",
+    "alter_id", "encryption", "raw")
+_OUT_NUM_AS_STR = ("port", "alter_id")
+
+
+def _outbound_from_obj(obj: Any) -> Outbound:
+    """Validate an editor payload and build the Outbound.
+
+    Unknown fields and wrongly-typed values are rejected (-32602) instead of
+    being dropped or crashing a handler later.  ``port`` / ``alter_id`` may
+    be given as integers (raw JSON editing); everything else must be a
+    string.  ``extra`` is free-form JSON, ``extra_params`` holds scalars.
+    """
+    if not isinstance(obj, dict):
+        raise invalid_params("outbound must be an object")
+    known = {f.name for f in dataclasses.fields(Outbound)}
+    bad = set(obj) - known
+    if bad:
+        raise invalid_params(f"unknown outbound fields: {', '.join(sorted(bad))}")
+    data = dict(obj)
+    for key in _OUT_STR_FIELDS:
+        if key not in data:
+            continue
+        v = data[key]
+        if key in _OUT_NUM_AS_STR and isinstance(v, int) and not isinstance(v, bool):
+            data[key] = v = str(v)
+        if not isinstance(v, str):
+            raise invalid_params(f"{key} must be a string")
+    if "allow_insecure" in data and not isinstance(data["allow_insecure"], bool):
+        raise invalid_params("allow_insecure must be true or false")
+    for key in ("extra", "extra_params"):
+        if key in data:
+            v = data[key]
+            if not isinstance(v, dict) or not all(isinstance(k, str) for k in v):
+                raise invalid_params(f"{key} must be an object")
+    for k, v in (data.get("extra_params") or {}).items():
+        if not isinstance(v, (str, int, float, bool)):
+            raise invalid_params(f"extra_params.{k} must be a string or number")
+    if data.get("port") and not valid_port(data["port"]):
+        raise invalid_params("port must be 1..65535")
+    data["raw"] = ""
+    return Outbound.from_dict(data)
+
 
 def build(emit, sources: SourceManager | None = None
           ) -> tuple[Dispatcher, JobManager]:
@@ -134,7 +181,10 @@ def build(emit, sources: SourceManager | None = None
                 "cores": core_names(), "methods": d.names(),
                 "defaults": {"fp": DEFAULT_FP, "cs": DEFAULT_CS,
                              "fm": DEFAULT_FM, "template": DEFAULT_TEMPLATE},
-                "template_keys": list(TEMPLATE_KEYS)}
+                "template_keys": list(TEMPLATE_KEYS),
+                "editor": {"transports": TRANSPORTS, "flows": FLOWS,
+                           "securities": SECURITIES,
+                           "xhttp_modes": XHTTP_MODES}}
 
     # ------------------------------------------------------------- config
     @d.method("config.parse")
@@ -152,13 +202,7 @@ def build(emit, sources: SourceManager | None = None
     @d.method("config.render")
     def config_render(outbound: dict) -> dict:
         """Edited outbound -> share link (the editor's save path)."""
-        if not isinstance(outbound, dict):
-            raise invalid_params("outbound must be an object")
-        known = {f.name for f in dataclasses.fields(Outbound)}
-        bad = set(outbound) - known
-        if bad:
-            raise invalid_params(f"unknown outbound fields: {', '.join(sorted(bad))}")
-        out = Outbound.from_dict(outbound)
+        out = _outbound_from_obj(outbound)
         h = handler_for(out.scheme)
         if h is None:
             raise invalid_params(f"unsupported scheme: {out.scheme!r}")
@@ -166,6 +210,20 @@ def build(emit, sources: SourceManager | None = None
         again = parse_target(uri)
         return {"uri": uri, "roundtrip_ok": again is not None,
                 "supports": _core_support(out)}
+
+    @d.method("config.from_json")
+    def config_from_json(text: str) -> dict:
+        """Raw-JSON editor -> validated outbound (the JSON -> form step)."""
+        if not isinstance(text, str):
+            raise invalid_params("text must be a string")
+        try:
+            obj = json.loads(text)
+        except ValueError as e:
+            raise invalid_params(f"bad JSON: {e}") from None
+        out = _outbound_from_obj(obj)
+        if handler_for(out.scheme) is None:
+            raise invalid_params(f"unsupported scheme: {out.scheme!r}")
+        return {"outbound": _outbound_dict(out), "supports": _core_support(out)}
 
     @d.method("config.convert")
     def config_convert(text: str, fp: str = DEFAULT_FP, cs: str = DEFAULT_CS,

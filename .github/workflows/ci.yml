@@ -87,18 +87,14 @@ jobs:
           test -s "$RUNNER_TEMP/clash.yaml" && test -s "$RUNNER_TEMP/sb.json"
 
       - name: GUI smoke test (launch and destroy)
+        # `python -c` (not a script in $RUNNER_TEMP): a script puts *its own*
+        # directory on sys.path, so the repo root was not importable.
         run: |
-          cat > "$RUNNER_TEMP/gui_smoke.py" <<'PY'
-          from xray_forge.app import App
-          app = App()
-          app.update()
-          app.destroy()
-          print("GUI smoke test passed")
-          PY
+          SMOKE="from xray_forge.app import App; a = App(); a.update(); a.destroy(); print('GUI smoke test passed')"
           if [ "$RUNNER_OS" = "Linux" ]; then
-            xvfb-run -a python "$RUNNER_TEMP/gui_smoke.py"
+            xvfb-run -a python -c "$SMOKE"
           else
-            python "$RUNNER_TEMP/gui_smoke.py"
+            python -c "$SMOKE"
           fi
 
   ui:

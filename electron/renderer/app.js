@@ -525,6 +525,23 @@ $('#sub-load').addEventListener('click', () => guarded($('#sub-msg'), async () =
 const call = (m, p = {}) => window.forge.call(m, p);
 const fmtMs = (v) => (v == null ? '' : String(Math.round(v)));
 
+// Highlight one row without rebuilding the table (rebuilding between the two
+// clicks of a double-click would swallow the dblclick).
+function markSelected(tr) {
+  const body = tr.parentElement;
+  body.querySelectorAll('tr.selected').forEach((x) => x.classList.remove('selected'));
+  tr.classList.add('selected');
+}
+
+// "Use as FORCE IP": fill the Convert tab's endpoint override.
+function useAsForceIp(ip, port, msgEl) {
+  $('#cv-ip').value = ip;
+  $('#cv-ip-on').checked = true;
+  if (port) { $('#cv-port').value = String(port); $('#cv-port-on').checked = true; }
+  cvScheduleCheck();
+  say(msgEl, `FORCE IP set to ${ip}${port ? ':' + port : ''} (Convert tab)`);
+}
+
 function fillSelect(sel, items, placeholder) {
   const keep = sel.value;
   sel.replaceChildren(h('option', { value: '' }, placeholder),
@@ -546,17 +563,37 @@ function progressHandlers(prefix) {
 }
 
 // --------------------------------------------------------------- scanner
-const sc = { rows: new Map(), job: null };
+const sc = { rows: new Map(), job: null, selected: '' };
 
 function renderScan() {
   const showDead = $('#sc-dead').checked;
   const rows = [...sc.rows.values()].filter((r) => r.alive || showDead)
     .sort((a, b) => (a.alive === b.alive ? (a.ms ?? 9e9) - (b.ms ?? 9e9) : a.alive ? -1 : 1));
-  $('#sc-table tbody').replaceChildren(...rows.map((r) => h('tr', { class: r.alive ? '' : 'bad' },
+  $('#sc-table tbody').replaceChildren(...rows.map((r) => h('tr', {
+    class: `${r.alive ? '' : 'bad'} ${sc.selected === r.ip ? 'selected' : ''}`,
+    onclick: (e) => selectScanRow(r, e.currentTarget),
+    ondblclick: () => copyText(r.ip, $('#sc-status'), 'IP') },
     h('td', {}, r.ip), h('td', {}, r.port), h('td', {}, fmtMs(r.ms)), h('td', {}, fmtMs(r.jitter)),
     h('td', {}, r.tls), h('td', {}, r.cc), h('td', {}, r.isp), h('td', {}, r.info))));
 }
 $('#sc-dead').addEventListener('change', renderScan);
+
+function clearScanSelection() {
+  sc.selected = '';
+  $('#sc-copy-ip').disabled = true;
+  $('#sc-use-ip').disabled = true;
+}
+function selectScanRow(r, tr) {
+  sc.selected = r.ip;
+  markSelected(tr);
+  $('#sc-copy-ip').disabled = false;
+  $('#sc-use-ip').disabled = false;
+}
+$('#sc-copy-ip').addEventListener('click', () => { if (sc.selected) copyText(sc.selected, $('#sc-status'), 'IP'); });
+$('#sc-use-ip').addEventListener('click', () => {
+  const r = sc.rows.get(sc.selected);
+  if (r) useAsForceIp(r.ip, r.port, $('#sc-status'));
+});
 
 function scStatus() {
   const all = [...sc.rows.values()];
@@ -573,6 +610,7 @@ async function startScan(resume) {
   if (resume) { params.resume = true; params.session = $('#sc-sessions').value; }
   const r = await call('scan.run', params);
   sc.rows = new Map();
+  clearScanSelection();
   renderScan();
   $('#sc-progress').value = 0;
   $('#sc-start').disabled = true; $('#sc-resume').disabled = true; $('#sc-cancel').disabled = false;
@@ -597,6 +635,7 @@ $('#sc-load').addEventListener('click', () => guarded($('#sc-status'), async () 
   if (!name) { say($('#sc-status'), 'choose a saved scan first', true); return; }
   const r = await call('scan.get', { session: name });
   sc.rows = new Map(r.results.map((x) => [x.ip, x]));
+  clearScanSelection();
   renderScan();
   say($('#sc-status'), `loaded ${name}: ${scStatus()}${r.pending ? `, ${r.pending} pending` : ''}`);
 }));
@@ -612,13 +651,80 @@ $('#sc-to-sni').addEventListener('click', () => {
 });
 onTab.scan = refreshScanSessions;
 
+// ------------------------------------------------------- lookup (geo, DNS)
+const net = { selected: '' };
+
+async function runGeo(ip) {
+  say($('#net-msg'), ip ? `looking up ${ip}…` : 'looking up your IP…');
+  const r = await call('net.geo', { ip });
+  const out = $('#net-geo-out');
+  out.hidden = false;
+  out.textContent = r.text;
+  say($('#net-msg'), r.ok ? 'done' : 'every lookup provider failed', !r.ok);
+}
+$('#net-myip').addEventListener('click', () => guarded($('#net-msg'), () => runGeo('')));
+$('#net-geo').addEventListener('click', () => guarded($('#net-msg'), () => runGeo($('#net-geo-q').value.trim())));
+
+function selectNetRow(ip, tr) {
+  net.selected = ip;
+  markSelected(tr);
+  $('#net-copy-ip').disabled = false;
+  $('#net-use-ip').disabled = false;
+}
+
+$('#net-resolve').addEventListener('click', () => guarded($('#net-msg'), async () => {
+  const host = $('#net-host').value.trim();
+  if (!host) { say($('#net-msg'), 'enter a host', true); return; }
+  say($('#net-msg'), `resolving ${host}…`);
+  $('#net-resolve').disabled = true;
+  try {
+    const r = await call('net.resolve', { host });
+    $('#net-res-box').hidden = false;
+    net.selected = '';
+    $('#net-copy-ip').disabled = true;
+    $('#net-use-ip').disabled = true;
+    $('#net-res-table tbody').replaceChildren(...r.answers.map((a) => h('tr', {
+      onclick: (e) => selectNetRow(a.ip, e.currentTarget),
+      ondblclick: () => copyText(a.ip, $('#net-msg'), 'IP') },
+    h('td', {}, a.ip), h('td', {}, a.sources.join(', ')))));
+    say($('#net-msg'), r.answers.length ? `resolved ${r.answers.length} IP(s)` : 'no answers', !r.answers.length);
+  } finally { $('#net-resolve').disabled = false; }
+}));
+$('#net-host').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#net-resolve').click(); });
+$('#net-geo-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#net-geo').click(); });
+$('#net-copy-ip').addEventListener('click', () => { if (net.selected) copyText(net.selected, $('#net-msg'), 'IP'); });
+$('#net-use-ip').addEventListener('click', () => { if (net.selected) useAsForceIp(net.selected, '', $('#net-msg')); });
+
 // ------------------------------------------------------------ SNI search
-const sn = { rows: new Map(), job: null, session: '' };
+const sn = { rows: new Map(), job: null, session: '', selected: '' };
+
+function clearSniSelection() {
+  sn.selected = '';
+  $('#sn-copy').disabled = true;
+  $('#sn-use-ip').disabled = true;
+}
+function selectSniRow(r, tr) {
+  sn.selected = `${r.ip}|${r.sni}`;
+  markSelected(tr);
+  $('#sn-copy').disabled = false;
+  $('#sn-use-ip').disabled = false;
+}
+$('#sn-copy').addEventListener('click', () => {
+  const r = sn.rows.get(sn.selected);
+  if (r) copyText(`${r.ip}  sni=${r.sni}`, $('#sn-status'), 'IP + SNI');
+});
+$('#sn-use-ip').addEventListener('click', () => {
+  const r = sn.rows.get(sn.selected);
+  if (r) useAsForceIp(r.ip, '', $('#sn-status'));
+});
 
 function renderSni() {
   const rows = [...sn.rows.values()].filter((r) => r.ok)
     .sort((a, b) => (b.http_ok - a.http_ok) || ((a.tls_ms ?? 9e9) - (b.tls_ms ?? 9e9)));
-  $('#sn-table tbody').replaceChildren(...rows.map((r) => h('tr', {},
+  $('#sn-table tbody').replaceChildren(...rows.map((r) => h('tr', {
+    class: sn.selected === `${r.ip}|${r.sni}` ? 'selected' : '',
+    onclick: (e) => selectSniRow(r, e.currentTarget),
+    ondblclick: () => copyText(`${r.ip}  sni=${r.sni}`, $('#sn-status'), 'IP + SNI') },
     h('td', {}, r.ip), h('td', {}, r.sni), h('td', {}, fmtMs(r.tls_ms)), h('td', {}, r.tls_ver),
     h('td', {}, h('span', { class: `chip ${r.http_ok ? 'ok' : 'fail'}` }, r.http_ok ? 'ok' : 'no')),
     h('td', {}, r.info))));
@@ -633,7 +739,7 @@ $('#sn-start').addEventListener('click', () => guarded($('#sn-status'), async ()
   };
   if ($('#sn-from-scan').value) params.from_scan = $('#sn-from-scan').value;
   const r = await call('sni.run', params);
-  sn.rows = new Map(); sn.session = r.session; renderSni();
+  sn.rows = new Map(); sn.session = r.session; clearSniSelection(); renderSni();
   $('#sn-start').disabled = true; $('#sn-cancel').disabled = false;
   say($('#sn-status'), `probing ${r.pairs} (IP, SNI) pairs…`);
   sn.job = r.job;

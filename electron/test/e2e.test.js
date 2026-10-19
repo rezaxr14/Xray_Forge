@@ -595,3 +595,161 @@ test('copy falls back without the async clipboard API and the CSP stays quiet', 
     assert.deepEqual(problems, []);                                  // no CSP violations
   } finally { await close(); }
 });
+
+// ------------------------------------------------------------ step 5.3
+const stubClipboard = (page) => page.evaluate(() => {
+  window.__clip = [];
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (t) => { window.__clip.push(t); } }, configurable: true });
+});
+
+test('scan results: select, copy IP and use as FORCE IP in the converter', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.waitForFunction(() => /engine v\d/.test(document.querySelector('#engine-status').textContent));
+    await stubClipboard(page);
+    await page.click('[data-tab=scan]');
+    assert.equal(await page.isDisabled('#sc-use-ip'), true);
+    await page.fill('#sc-cidrs', '127.0.0.1/32');
+    await page.fill('#sc-port', '9');
+    await page.check('#sc-dead');
+    await page.click('#sc-start');
+    await page.waitForFunction(() => /^done/.test(document.querySelector('#sc-status').textContent), null, { timeout: 30000 });
+
+    await page.click('#sc-table tbody tr');
+    assert.equal(await page.locator('#sc-table tbody tr.selected').count(), 1);
+    await page.click('#sc-copy-ip');
+    await page.waitForFunction(() => window.__clip.length === 1);
+    assert.deepEqual(await page.evaluate(() => window.__clip), ['127.0.0.1']);
+    await page.dblclick('#sc-table tbody tr');                 // double-click copies once more
+    await page.waitForFunction(() => window.__clip.length === 2);
+    await page.waitForTimeout(200);                            // ...and the two clicks inside it copy nothing
+    assert.deepEqual(await page.evaluate(() => window.__clip), ['127.0.0.1', '127.0.0.1']);
+    await page.click('#sc-use-ip');
+    assert.match(await page.textContent('#sc-status'), /FORCE IP set to 127\.0\.0\.1:9/);
+
+    await page.click('[data-tab=convert]');
+    assert.equal(await page.inputValue('#cv-ip'), '127.0.0.1');
+    assert.equal(await page.inputValue('#cv-port'), '9');
+    assert.equal(await page.isChecked('#cv-ip-on'), true);
+    assert.equal(await page.isChecked('#cv-port-on'), true);
+    await page.waitForFunction(() => document.querySelector('#cv-ip-badge').textContent === 'ipv4');
+    await page.fill('#cv-input', VLESS);
+    await page.click('#cv-run');
+    await page.waitForFunction(() => /endpoint → 127\.0\.0\.1:9/.test(document.querySelector('#cv-msg').textContent));
+    assert.match(await page.inputValue('#cv-output'), /@127\.0\.0\.1:9\?/);
+
+    // a new scan clears the selection
+    await page.click('[data-tab=scan]');
+    await page.click('#sc-start');
+    await page.waitForFunction(() => document.querySelector('#sc-copy-ip').disabled === true);
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('lookup panel: geo, my IP, resolve table, copy and FORCE IP (engine answers stubbed)', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.waitForFunction(() => /engine v\d/.test(document.querySelector('#engine-status').textContent));
+    await stubClipboard(page);
+    await page.evaluate(() => {
+      const real = window.forge.call;
+      window.__geoCalls = [];
+      window.forge.call = (m, p) => {
+        if (m === 'net.geo') {
+          window.__geoCalls.push(p.ip);
+          return Promise.resolve(p.ip === 'fail.example'
+            ? { query: p.ip, text: 'lookup failed (all providers blocked?)', ok: false }
+            : { query: p.ip, text: `${p.ip || '5.6.7.8'}  —  Berlin, Germany\nHetzner`, ok: true });
+        }
+        if (m === 'net.resolve') {
+          return Promise.resolve(p.host === 'none.example' ? { host: p.host, answers: [] }
+            : { host: p.host, answers: [{ ip: '104.16.1.1', sources: ['DoH:cloudflare-dns.com', 'system'] }, { ip: '10.10.34.34', sources: ['UDP:shecan'] }] });
+        }
+        return real(m, p);
+      };
+    });
+    await page.click('[data-tab=scan]');
+
+    await page.click('#net-myip');
+    await page.waitForFunction(() => /done/.test(document.querySelector('#net-msg').textContent));
+    assert.match(await page.textContent('#net-geo-out'), /^5\.6\.7\.8 {2}— {2}Berlin, Germany\nHetzner$/);
+    await page.fill('#net-geo-q', '1.1.1.1');
+    await page.press('#net-geo-q', 'Enter');
+    await page.waitForFunction(() => window.__geoCalls.length === 2);
+    assert.deepEqual(await page.evaluate(() => window.__geoCalls), ['', '1.1.1.1']);
+    await page.fill('#net-geo-q', 'fail.example');
+    await page.click('#net-geo');
+    await page.waitForFunction(() => /provider failed/.test(document.querySelector('#net-msg').textContent));
+    assert.ok((await page.getAttribute('#net-msg', 'class')).includes('bad-text'));
+
+    await page.fill('#net-host', 'example.com');
+    await page.click('#net-resolve');
+    await page.waitForSelector('#net-res-table tbody tr:nth-child(2)');
+    assert.match(await page.textContent('#net-res-table tbody tr:nth-child(1)'), /104\.16\.1\.1.*DoH:cloudflare-dns\.com, system/);
+    assert.equal(await page.isDisabled('#net-use-ip'), true);
+    await page.click('#net-res-table tbody tr:nth-child(2)');
+    await page.click('#net-copy-ip');
+    await page.waitForFunction(() => window.__clip.length === 1);
+    assert.equal(await page.evaluate(() => window.__clip[0]), '10.10.34.34');
+    await page.click('#net-use-ip');
+    assert.equal(await page.inputValue('#cv-ip'), '10.10.34.34');
+    assert.equal(await page.inputValue('#cv-port'), '');          // resolve answers carry no port
+    assert.equal(await page.isChecked('#cv-port-on'), false);
+
+    await page.fill('#net-host', 'none.example');
+    await page.click('#net-resolve');
+    await page.waitForFunction(() => /no answers/.test(document.querySelector('#net-msg').textContent));
+    assert.equal(await page.locator('#net-res-table tbody tr').count(), 0);
+    assert.equal(await page.isDisabled('#net-use-ip'), true);
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('lookup panel against the real engine: validation errors and IP literals (offline)', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.waitForFunction(() => /engine v\d/.test(document.querySelector('#engine-status').textContent));
+    await page.click('[data-tab=scan]');
+    await page.click('#net-resolve');
+    assert.match(await page.textContent('#net-msg'), /enter a host/);
+    await page.fill('#net-host', 'a.com/../x');
+    await page.click('#net-resolve');
+    await page.waitForFunction(() => /IPv4\/IPv6 address or a domain/.test(document.querySelector('#net-msg').textContent));
+    assert.equal(await page.isDisabled('#net-resolve'), false);
+    await page.fill('#net-geo-q', 'x?y=1');
+    await page.click('#net-geo');
+    await page.waitForFunction(() => /IPv4\/IPv6 address or a domain/.test(document.querySelector('#net-msg').textContent));
+    assert.equal(await page.isHidden('#net-geo-out'), true);
+    await page.fill('#net-host', '9.9.9.9');
+    await page.click('#net-resolve');
+    await page.waitForSelector('#net-res-table tbody tr');
+    assert.match(await page.textContent('#net-res-table tbody tr'), /9\.9\.9\.9.*literal/);
+    assert.deepEqual(problems.filter((p) => !/status of 400|Failed to load resource/.test(p)), []);
+  } finally { await close(); }
+});
+
+test('SNI results: copy IP + SNI and use the IP as FORCE IP', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.waitForFunction(() => /engine v\d/.test(document.querySelector('#engine-status').textContent));
+    await stubClipboard(page);
+    await page.click('[data-tab=sni]');
+    assert.equal(await page.isDisabled('#sn-copy'), true);
+    // no live host answers in CI, so feed the table the rows a search would stream
+    await page.evaluate(() => {
+      sn.rows.set('203.0.113.5|front.example', { ip: '203.0.113.5', sni: 'front.example', ok: true, http_ok: true, tls_ms: 40, tls_ver: 'TLSv1.3', info: '' });
+      sn.rows.set('203.0.113.6|other.example', { ip: '203.0.113.6', sni: 'other.example', ok: true, http_ok: false, tls_ms: 90, tls_ver: 'TLSv1.3', info: '' });
+      renderSni();
+    });
+    await page.click('#sn-table tbody tr:nth-child(1)');
+    await page.click('#sn-copy');
+    await page.waitForFunction(() => window.__clip.length === 1);
+    assert.equal(await page.evaluate(() => window.__clip[0]), '203.0.113.5  sni=front.example');
+    await page.click('#sn-table tbody tr:nth-child(2)');
+    await page.click('#sn-use-ip');
+    assert.match(await page.textContent('#sn-status'), /FORCE IP set to 203\.0\.113\.6 \(Convert tab\)/);
+    await page.click('[data-tab=convert]');
+    assert.equal(await page.inputValue('#cv-ip'), '203.0.113.6');
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});

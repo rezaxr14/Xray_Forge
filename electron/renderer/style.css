@@ -72,3 +72,6 @@ aside.names { width: 300px; }
 .name-list li { padding: 3px 6px; cursor: pointer; border-radius: 4px; overflow-wrap: anywhere; }
 .name-list li:hover, .name-list li:focus-visible { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 input[disabled] { opacity: .5; }
+pre.out { margin: 6px 0; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.table-wrap.short { max-height: 22vh; }

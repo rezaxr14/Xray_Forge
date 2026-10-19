@@ -92,8 +92,16 @@ See `docs/engine-api.md`.
     (`extra_params`) survive every edit. Payloads are now validated by the
     engine. Also fixed: the 5.1 copy fallback used an inline style that the
     renderer CSP blocks (now covered by a test).
-  - ⬜ 5.3 IP-finder extras: `net.resolve`, `net.geo` / my-IP, copy IP, use as
-    FORCE IP.
+  - ✅ 5.3 IP-finder extras: `net.resolve` (DNS answers per resolver) and
+    `net.geo` (geo/ISP, my IP) with a Lookup panel on the IP scanner tab;
+    select a scan row, resolve answer or SNI hit to copy its IP (double-click)
+    or use it as FORCE IP in the converter. Engine side is unit-tested with
+    faked network; the UI is e2e-tested with those two engine calls stubbed, so
+    **no real geo provider or resolver was contacted by any test**.
+    Also fixed: automatic scan/SNI session names had one-second resolution, so
+    two runs started within a second shared a session and the second failed
+    with "no scannable IPs" (found as a flaky e2e test; now unique, with a
+    regression test).
   - ⬜ 5.4 Subscriptions: best-N export, check-all-sources.
   - ⬜ 5.5 File open/save dialogs, settings persistence.
   - ⬜ 5.6 Retire the Tk GUI once parity holds.

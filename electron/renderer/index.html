@@ -203,6 +203,31 @@
 
     <!-- IP scanner -->
     <section id="tab-scan" class="tab" role="tabpanel" hidden>
+      <fieldset class="rules" id="net-box">
+        <legend>Lookup</legend>
+        <div class="row">
+          <button id="net-myip">My IP</button>
+          <label>IP or domain <input id="net-geo-q" type="text" size="26" placeholder="empty = your own IP"></label>
+          <button id="net-geo">Geo lookup</button>
+          <label>Resolve host <input id="net-host" type="text" size="26" placeholder="example.com"></label>
+          <button id="net-resolve">Resolve DNS</button>
+          <span id="net-msg" class="muted" role="status"></span>
+        </div>
+        <pre id="net-geo-out" class="out" hidden></pre>
+        <div id="net-res-box" hidden>
+          <p class="muted small">Resolvers that disagree can mean the answer was tampered with (DoH, Iranian UDP resolvers, system DNS).</p>
+          <div class="table-wrap short">
+            <table id="net-res-table">
+              <thead><tr><th>IP</th><th>Answered by</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="row">
+            <button id="net-copy-ip" disabled>Copy IP</button>
+            <button id="net-use-ip" disabled>Use as FORCE IP</button>
+          </div>
+        </div>
+      </fieldset>
       <div class="row">
         <textarea id="sc-cidrs" rows="3" spellcheck="false" placeholder="CIDR ranges, one per line (e.g. 188.114.96.0/20)"></textarea>
         <div class="col">
@@ -232,6 +257,11 @@
           <tbody></tbody>
         </table>
       </div>
+      <div class="row">
+        <button id="sc-copy-ip" disabled>Copy IP</button>
+        <button id="sc-use-ip" disabled>Use as FORCE IP</button>
+        <span class="muted small">click a row to select it; double-click copies its IP</span>
+      </div>
       <textarea id="sc-out" rows="4" readonly spellcheck="false" placeholder="Export output appears here"></textarea>
     </section>
 
@@ -257,6 +287,11 @@
           <thead><tr><th>IP</th><th>SNI</th><th>TLS ms</th><th>TLS</th><th>HTTP</th><th>Info</th></tr></thead>
           <tbody></tbody>
         </table>
+      </div>
+      <div class="row">
+        <button id="sn-copy" disabled>Copy IP + SNI</button>
+        <button id="sn-use-ip" disabled>Use IP as FORCE IP</button>
+        <span class="muted small">click a row to select it; double-click copies IP and SNI</span>
       </div>
       <textarea id="sn-out" rows="4" readonly spellcheck="false" placeholder="Export output appears here"></textarea>
     </section>

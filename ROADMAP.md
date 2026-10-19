@@ -75,7 +75,22 @@ See `docs/engine-api.md`.
   `docs/packaging.md`. **Not yet run**: the first `workflow_dispatch`/tag
   build is the real test; unsigned installers; no lock file yet.
 - ✅ Cores tab: detect xray/sing-box/mihomo (saved path, env, v2rayN, ./bin, PATH), set/clear path; `health.run` explains a missing core.
-- ⬜ Step 5: retire the Tk GUI once the Electron app has feature parity.
+- 🟡 Step 5: reach parity with the Tk GUI, then retire it (`app.py`, `ui/`,
+  GUI tests, CI steps). In order:
+  - ✅ 5.1 Converter rules UI: mode (full / IP only / custom), fp/cs/fm
+    switches and values, only-TLS, rename + template + start #, FORCE IP /
+    PORT with live validation, names list + copy names / config / output,
+    tag `[CC]` (Health tab, from the exit country a core reports).
+    Verified by Python tests and Playwright e2e against the real engine; the
+    `[CC]` button is e2e-tested with simulated rows because no proxy core runs
+    in CI.
+  - ⬜ 5.2 Fuller config editor: reality/vmess/tls/xhttp extras,
+    allow_insecure, header_type, raw JSON view.
+  - ⬜ 5.3 IP-finder extras: `net.resolve`, `net.geo` / my-IP, copy IP, use as
+    FORCE IP.
+  - ⬜ 5.4 Subscriptions: best-N export, check-all-sources.
+  - ⬜ 5.5 File open/save dialogs, settings persistence.
+  - ⬜ 5.6 Retire the Tk GUI once parity holds.
 
 ---
 

@@ -321,3 +321,136 @@ test('Cores tab detects, validates and saves a core path', opts, async () => {
     assert.deepEqual(problems, []);
   } finally { await close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ------------------------------------------------------------ step 5.1
+test('convert rules: IP-only mode, forced endpoint, live badges, names list', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.click('[data-tab=convert]');
+    await page.waitForFunction(() => document.querySelector('#cv-cs').value.length > 20);
+    assert.equal(await page.inputValue('#cv-fp'), 'chrome');
+    assert.match(await page.textContent('#cv-keys'), /\{id\}.*\{old\}/);
+
+    // Full fix injects cs and fm.
+    await page.fill('#cv-input', VLESS);
+    await page.click('#cv-run');
+    await page.waitForFunction(() => document.querySelector('#cv-output').value.includes('cs='));
+    assert.match(await page.inputValue('#cv-output'), /fm=/);
+
+    // Live endpoint feedback.
+    await page.fill('#cv-ip', '9.9.9.9');
+    await page.fill('#cv-port', '70000');
+    await page.waitForFunction(() => /1-65535/.test(document.querySelector('#cv-port-badge').textContent));
+    assert.equal(await page.textContent('#cv-ip-badge'), 'ipv4');
+    assert.equal(await page.isChecked('#cv-ip-on'), true);
+    assert.equal(await page.textContent('#cv-ep'), 'endpoint: 9.9.9.9 : 70000');
+    await page.click('#cv-run');
+    await page.waitForFunction(() => /port/.test(document.querySelector('#cv-msg').textContent));
+    assert.equal(await page.getAttribute('#cv-msg', 'class').then((c) => c.includes('bad-text')), true);
+
+    // IP only: nothing injected, endpoint forced, naming template + start #.
+    await page.selectOption('#cv-mode', 'iponly');
+    assert.equal(await page.isDisabled('#cv-fp'), true);
+    assert.equal(await page.isChecked('#cv-want-cs'), false);
+    await page.fill('#cv-port', '2053');
+    await page.fill('#cv-template', 'n{id:03d}_{proto}');
+    await page.fill('#cv-start', '40');
+    await page.click('#cv-run');
+    await page.waitForFunction(() => /endpoint → 9\.9\.9\.9:2053/.test(document.querySelector('#cv-msg').textContent));
+    const out = await page.inputValue('#cv-output');
+    assert.match(out, /@9\.9\.9\.9:2053\?/);
+    assert.doesNotMatch(out, /cs=|fm=/);
+    assert.match(out, /#n041_vless$/);
+    assert.equal(await page.locator('#cv-names li').count(), 1);
+    assert.equal(await page.textContent('#cv-names li'), 'n041_vless');
+
+    // Clear override and reset rules.
+    await page.click('#cv-ov-clear');
+    assert.equal(await page.inputValue('#cv-ip'), '');
+    assert.equal(await page.isChecked('#cv-ip-on'), false);
+    await page.click('#cv-reset');
+    assert.equal(await page.inputValue('#cv-template'), '{id:02d}_{sub}_{path}');
+    assert.equal(await page.isChecked('#cv-want-cs'), true);
+    assert.equal(await page.isDisabled('#cv-fp'), false);
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('convert rules: custom switches, TLS-only, rename off, copy names/config', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.evaluate(() => {
+      window.__clip = [];
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (t) => { window.__clip.push(t); } }, configurable: true });
+    });
+    const REALITY = 'vless://13b8ac3f-e8de-4b2d-82db-e9130d288a54@203.0.113.7:443?security=reality&sni=www.microsoft.com&fp=chrome&pbk=SbVKOEMjK0sIlbwg4akyBg5mL5KZwwB-ed4eEE7YnRc&sid=6ba85179&type=tcp#reality-node';
+    await page.click('[data-tab=convert]');
+    await page.waitForFunction(() => document.querySelector('#cv-cs').value.length > 20);
+    await page.fill('#cv-input', `${VLESS}\n${REALITY}`);
+
+    await page.selectOption('#cv-mode', 'custom');
+    assert.equal(await page.isDisabled('#cv-want-cs'), false);
+    await page.uncheck('#cv-want-fm');
+    await page.uncheck('#cv-want-cs');
+    await page.uncheck('#cv-rename');
+    await page.fill('#cv-fp', 'firefox');
+    await page.click('#cv-run');
+    await page.waitForFunction(() => /skipped/.test(document.querySelector('#cv-msg').textContent));
+    assert.match(await page.textContent('#cv-msg'), /1 skipped/);
+    const lines = (await page.inputValue('#cv-output')).split('\n');
+    assert.equal(lines.length, 2);
+    assert.match(lines[0], /fp=firefox/);
+    assert.doesNotMatch(lines[0], /cs=|fm=/);
+    assert.match(lines[0], /#first$/);
+
+    await page.uncheck('#cv-tls-only');
+    await page.click('#cv-run');
+    await page.waitForFunction(() => /0 skipped/.test(document.querySelector('#cv-msg').textContent));
+    assert.match((await page.inputValue('#cv-output')).split('\n')[1], /fp=firefox/);
+
+    await page.click('#cv-copy-names');
+    await page.click('#cv-names li:nth-child(2)');
+    await page.click('#cv-copy');
+    const clip = await page.evaluate(() => window.__clip);
+    assert.deepEqual(clip[0].split('\n'), ['first', 'reality-node']);
+    assert.match(clip[1], /^vless:\/\/.*#reality-node$/);
+    assert.equal(clip[2], await page.inputValue('#cv-output'));
+
+    // Invalid fm is reported, not injected.
+    await page.fill('#cv-fm', '{broken');
+    await page.check('#cv-want-fm');
+    await page.click('#cv-run');
+    await page.waitForFunction(() => /fm must be valid JSON/.test(document.querySelector('#cv-msg').textContent));
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('health: Tag names [CC] uses the exit country reported by a core', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.click('[data-tab=health]');
+    assert.equal(await page.isDisabled('#hc-tag'), true);
+    // No proxy core exists in CI, so feed the table the rows a core-backed run
+    // would stream (this exercises the button and config.tag_cc, not the core).
+    await page.evaluate((line) => {
+      state.hcRows = [
+        { line, name: 'first', scheme: 'vless', score: 90, passed: true,
+          stages: [{ name: 'request', ok: true, ms: 10, data: { cc: 'DE', exit_ip: '1.1.1.1' } }] },
+        { line: line + 'x', name: 'second', scheme: 'vless', score: 10, passed: false, stages: [] },
+      ];
+      renderHealth();
+      document.querySelector('#hc-tag').disabled = false;
+    }, VLESS);
+    await page.click('#hc-tag');
+    await page.waitForFunction(() => /tagged 1/.test(document.querySelector('#hc-status').textContent));
+    assert.match(await page.textContent('#hc-table tbody tr:nth-child(1)'), /first\[DE\]/);
+    assert.doesNotMatch(await page.textContent('#hc-table tbody tr:nth-child(2)'), /\[/);
+    await page.click('#hc-tag');   // idempotent
+    await page.waitForFunction(() => /tagged 0/.test(document.querySelector('#hc-status').textContent));
+    await page.evaluate(() => { document.querySelector('#hc-keep').disabled = false; });
+    await page.click('#hc-keep');
+    await page.waitForSelector('#cfg-table tbody tr');
+    assert.match(await page.textContent('#cfg-table tbody tr'), /first\[DE\]/);
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});

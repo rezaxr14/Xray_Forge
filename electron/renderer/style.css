@@ -55,3 +55,13 @@ fieldset { border: 1px solid var(--line); border-radius: 8px; display: flex; gap
 legend { color: var(--muted); font-size: 12px; padding: 0 4px; }
 fieldset label { flex-direction: row; align-items: center; gap: 6px; color: var(--text); font-size: 14px; }
 .row > label > textarea { min-width: 340px; }
+fieldset.rules { display: block; margin: 10px 0; }
+fieldset.rules .row { margin: 6px 0; }
+.grow { flex: 1; min-width: 0; }
+.row label.grow input { width: 100%; }
+.small { font-size: 12px; margin: 4px 0 0; }
+aside.names { width: 300px; }
+.name-list { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow: auto; font: 12px ui-monospace, Menlo, Consolas, monospace; }
+.name-list li { padding: 3px 6px; cursor: pointer; border-radius: 4px; overflow-wrap: anywhere; }
+.name-list li:hover, .name-list li:focus-visible { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+input[disabled] { opacity: .5; }

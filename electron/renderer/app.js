@@ -165,15 +165,138 @@ $('#export-run').addEventListener('click', () => guarded($('#export-out'), async
 }));
 
 // --------------------------------------------------------------- convert
-$('#cv-run').addEventListener('click', () => guarded($('#cv-msg'), async () => {
-  const params = { text: $('#cv-input').value, dedup: $('#cv-dedup').checked };
+const cv = { names: [], defaults: null, badgeTimer: null };
+
+async function copyText(text, msgEl, what) {
+  try {
+    await navigator.clipboard.writeText(text);
+    say(msgEl, `${what} copied`);
+  } catch {
+    // Fallback for contexts without the async clipboard API.
+    const ta = h('textarea', { 'aria-hidden': 'true', style: 'position:fixed;left:-9999px' });
+    ta.value = text;
+    document.body.append(ta);
+    ta.select();
+    const ok = document.execCommand && document.execCommand('copy');
+    ta.remove();
+    say(msgEl, ok ? `${what} copied` : 'copy failed: select the text and copy it manually', !ok);
+  }
+}
+
+function cvMode() { return $('#cv-mode').value; }
+
+function cvSyncMode() {
+  const mode = cvMode();
+  if (mode === 'full') for (const k of ['fp', 'cs', 'fm']) $(`#cv-want-${k}`).checked = true;
+  if (mode === 'iponly') for (const k of ['fp', 'cs', 'fm']) $(`#cv-want-${k}`).checked = false;
+  for (const k of ['fp', 'cs', 'fm']) {
+    $(`#cv-want-${k}`).disabled = mode !== 'custom';
+    $(`#cv-${k}`).disabled = mode === 'iponly';
+  }
+  $('#cv-tls-only').disabled = mode === 'iponly';
+}
+
+// Effective switches: "IP only" injects nothing whatever the checkboxes say.
+function cvWant(k) { return cvMode() !== 'iponly' && $(`#cv-want-${k}`).checked; }
+
+function cvOverride() {
+  return {
+    ip: $('#cv-ip-on').checked ? $('#cv-ip').value.trim() : '',
+    port: $('#cv-port-on').checked ? $('#cv-port').value.trim() : '',
+  };
+}
+
+function cvEndpointPreview() {
+  const o = cvOverride();
+  $('#cv-ep').textContent = `endpoint: ${o.ip || 'orig'} : ${o.port || 'orig'}`;
+}
+
+async function cvCheckOverride() {
+  cvEndpointPreview();
+  const o = cvOverride();
+  const r = await window.forge.call('config.check_override', o);
+  const ipBad = !!o.ip && r.ip == null;
+  const portBad = !!o.port && r.port === false;
+  say($('#cv-ip-badge'), o.ip ? (ipBad ? 'not an IP or domain' : r.ip) : '', ipBad);
+  say($('#cv-port-badge'), o.port ? (portBad ? 'must be 1-65535' : 'ok') : '', portBad);
+}
+function cvScheduleCheck() {
+  clearTimeout(cv.badgeTimer);
+  cv.badgeTimer = setTimeout(() => guarded($('#cv-msg'), cvCheckOverride), 150);
+}
+
+function cvRenderNames() {
+  $('#cv-names').replaceChildren(...cv.names.map((n) =>
+    h('li', { tabindex: 0, role: 'button', title: 'Click to copy this config',
+      onclick: () => copyText(n.line, $('#cv-msg'), 'config'),
+      onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); copyText(n.line, $('#cv-msg'), 'config'); } } },
+    n.name || '(unnamed)')));
+}
+
+function cvParams() {
+  const o = cvOverride();
+  const params = {
+    text: $('#cv-input').value, dedup: $('#cv-dedup').checked,
+    fp: $('#cv-fp').value, cs: $('#cv-cs').value, fm: $('#cv-fm').value,
+    tls_only: $('#cv-tls-only').checked, rename: $('#cv-rename').checked,
+    want_fp: cvWant('fp'), want_cs: cvWant('cs'), want_fm: cvWant('fm'),
+    start: Number($('#cv-start').value || 1), ip: o.ip, port: o.port,
+  };
   const tpl = $('#cv-template').value.trim();
   if (tpl) params.template = tpl;
-  const r = await window.forge.call('config.convert', params);
+  return params;
+}
+
+function cvResetRules() {
+  const d = cv.defaults;
+  if (!d) return;
+  $('#cv-mode').value = 'full';
+  $('#cv-fp').value = d.fp;
+  $('#cv-cs').value = d.cs;
+  $('#cv-fm').value = JSON.stringify(d.fm);
+  $('#cv-template').value = d.template;
+  $('#cv-start').value = '1';
+  for (const id of ['tls-only', 'rename', 'dedup']) $(`#cv-${id}`).checked = true;
+  cvClearOverride();
+  cvSyncMode();
+}
+
+function cvClearOverride() {
+  $('#cv-ip').value = ''; $('#cv-port').value = '';
+  $('#cv-ip-on').checked = false; $('#cv-port-on').checked = false;
+  cvScheduleCheck();
+}
+
+$('#cv-mode').addEventListener('change', cvSyncMode);
+for (const id of ['cv-ip', 'cv-port', 'cv-ip-on', 'cv-port-on']) {
+  $(`#${id}`).addEventListener('input', cvScheduleCheck);
+  $(`#${id}`).addEventListener('change', cvScheduleCheck);
+}
+// Typing a value switches its override on, like ticking the box.
+$('#cv-ip').addEventListener('input', () => { $('#cv-ip-on').checked = $('#cv-ip').value.trim() !== ''; });
+$('#cv-port').addEventListener('input', () => { $('#cv-port-on').checked = $('#cv-port').value.trim() !== ''; });
+$('#cv-ov-clear').addEventListener('click', cvClearOverride);
+$('#cv-reset').addEventListener('click', cvResetRules);
+
+$('#cv-run').addEventListener('click', () => guarded($('#cv-msg'), async () => {
+  const r = await window.forge.call('config.convert', cvParams());
   $('#cv-output').value = r.lines.join('\n');
+  cv.names = r.names;
+  cvRenderNames();
   const c = r.counts;
-  say($('#cv-msg'), `${c.fixed} fixed · ${c.unchanged} unchanged · ${c.skipped} skipped · ${r.removed} duplicates removed`);
+  const o = cvOverride();
+  const ep = o.ip || o.port ? ` · endpoint → ${o.ip || 'orig'}:${o.port || 'orig'}` : '';
+  say($('#cv-msg'), `${c.fixed} fixed · ${c.unchanged} unchanged · ${c.skipped} skipped · ${r.removed} duplicates removed${ep}`);
 }));
+$('#cv-copy').addEventListener('click', () => {
+  const text = $('#cv-output').value;
+  if (!text.trim()) { say($('#cv-msg'), 'nothing to copy'); return; }
+  copyText(text, $('#cv-msg'), 'output');
+});
+$('#cv-copy-names').addEventListener('click', () => {
+  if (!cv.names.length) { say($('#cv-msg'), 'no names to copy'); return; }
+  copyText(cv.names.map((n) => n.name).join('\n'), $('#cv-msg'), `${cv.names.length} names`);
+});
 $('#cv-send').addEventListener('click', () => guarded($('#cv-msg'), async () => {
   await setConfigs(linesOf($('#cv-output').value));
   document.querySelector('[data-tab=configs]').click();
@@ -203,6 +326,7 @@ $('#hc-start').addEventListener('click', () => guarded($('#hc-status'), async ()
   state.hcRows = [];
   renderHealth();
   $('#hc-keep').disabled = true;
+  $('#hc-tag').disabled = true;
   $('#hc-progress').value = 0;
   $('#hc-progress').max = lines.length;
   setHcRunning(true);
@@ -220,10 +344,32 @@ $('#hc-start').addEventListener('click', () => guarded($('#hc-status'), async ()
       const passed = state.hcRows.filter((r) => r.passed).length;
       say($('#hc-status'), `${ev.cancelled ? 'cancelled' : 'done'}: ${passed} of ${state.hcRows.length} passed`);
       $('#hc-keep').disabled = passed === 0;
+      $('#hc-tag').disabled = !state.hcRows.some(hcCountry);
     } else if (ev.type === 'error') { setHcRunning(false); say($('#hc-status'), ev.message, true); }
   });
 }));
 $('#hc-cancel').addEventListener('click', () => { if (state.hcJob) window.forge.call('job.cancel', { job: state.hcJob }); });
+// Exit country reported by the core-backed request stage, if any.
+const hcCountry = (r) => {
+  const st = (r.stages || []).find((x) => x.name === 'request' && x.data && x.data.cc);
+  return st ? st.data.cc : '';
+};
+
+$('#hc-tag').addEventListener('click', () => guarded($('#hc-status'), async () => {
+  const idx = [];
+  const items = [];
+  state.hcRows.forEach((r, i) => { const cc = hcCountry(r); if (cc) { idx.push(i); items.push({ line: r.line, cc }); } });
+  if (!items.length) { say($('#hc-status'), 'no result reported an exit country (run with a proxy core)', true); return; }
+  const res = await window.forge.call('config.tag_cc', { items });
+  res.items.forEach((it, k) => {
+    const row = state.hcRows[idx[k]];
+    row.line = it.line;
+    if (it.name) row.name = it.name;
+  });
+  renderHealth();
+  say($('#hc-status'), `tagged ${res.tagged} config name(s) with [exit-country]`);
+}));
+
 $('#hc-keep').addEventListener('click', () => guarded($('#hc-status'), async () => {
   const keep = state.hcRows.filter((r) => r.passed).sort((a, b) => b.score - a.score).map((r) => r.line);
   await setConfigs(keep);
@@ -471,7 +617,9 @@ $('#mt-ca').addEventListener('click', () => guarded($('#mt-msg'), async () => {
   try {
     state.info = await window.forge.call('engine.info', {});
     $('#engine-status').textContent = `engine v${state.info.version} · ${state.info.cores.length} cores`;
-    $('#cv-template').value = state.info.defaults.template;
+    cv.defaults = state.info.defaults;
+    cvResetRules();
+    $('#cv-keys').textContent = (state.info.template_keys || []).map((k) => `{${k}}`).join(' ');
     for (const c of state.info.cores) $('#hc-core').append(h('option', { value: c }, c));
   } catch (e) {
     $('#engine-status').textContent = `engine unavailable: ${e.message}`;

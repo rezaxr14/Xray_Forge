@@ -15,8 +15,8 @@ from urllib.parse import unquote, urlsplit
 from xray_forge import __version__
 from xray_forge.core import healthcheck as hc
 from xray_forge.core.config import (
-    DEFAULT_CS, DEFAULT_FM, DEFAULT_FP, DEFAULT_TEMPLATE, FLOWS, SECURITIES,
-    TEMPLATE_KEYS, TRANSPORTS, XHTTP_MODES,
+    CF_RANGES, DEFAULT_CS, DEFAULT_FM, DEFAULT_FP, DEFAULT_TEMPLATE, FASTLY_RANGES,
+    FLOWS, FRAG_PRESETS, SECURITIES, TEMPLATE_KEYS, WARP_RANGES, TRANSPORTS, XHTTP_MODES,
 )
 from xray_forge.core.cores import core_names, get_core
 from xray_forge.core.dedup import dedup_configs
@@ -186,6 +186,9 @@ def build(emit, sources: SourceManager | None = None
                 "defaults": {"fp": DEFAULT_FP, "cs": DEFAULT_CS,
                              "fm": DEFAULT_FM, "template": DEFAULT_TEMPLATE},
                 "template_keys": list(TEMPLATE_KEYS),
+                "frag_presets": list(FRAG_PRESETS),
+                "ranges": {"cloudflare": list(CF_RANGES), "fastly": list(FASTLY_RANGES),
+                           "warp": list(WARP_RANGES)},
                 "editor": {"transports": TRANSPORTS, "flows": FLOWS,
                            "securities": SECURITIES,
                            "xhttp_modes": XHTTP_MODES}}

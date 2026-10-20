@@ -294,3 +294,38 @@ def test_automatic_sni_names_never_collide_within_one_second(monkeypatch):
     b = c.result("sni.run", ips=["10.0.0.1"], snis=["a.example"], http_check=False)
     c.wait_job(b["job"])
     assert (a["session"], b["session"]) == ("sni_20260101_000000", "sni_20260101_000000_2")
+
+
+# ------------------------------------------------------------ frag + presets (5.6)
+def test_engine_info_offers_frag_and_range_presets():
+    info = Client().result("engine.info")
+    assert "5,94,1@2" in info["frag_presets"] and "off" in info["frag_presets"]
+    assert set(info["ranges"]) == {"cloudflare", "fastly", "warp"}
+    assert "104.16.0.0/13" in info["ranges"]["cloudflare"]
+    assert all("/" in c for v in info["ranges"].values() for c in v)
+
+
+def test_frag_reaches_the_scan_and_sni_runs_and_is_validated(monkeypatch):
+    seen = {}
+    real_run = scan_session.ScanSession.run
+
+    def spy(self, *a, **kw):
+        seen["scan"] = kw.get("frag")
+        return real_run(self, *a, **kw)
+    monkeypatch.setattr(scan_session.ScanSession, "run", spy)
+    _fake_scan(monkeypatch)
+    monkeypatch.setattr(
+        SniSearch, "probe",
+        lambda self, ip, sni, port="443", frag=None, timeout=5.0, http_check=True, stop=None:
+        (seen.__setitem__("sni", frag), SniHit(ip=ip, port=port, sni=sni, ok=False, info="x"))[1])
+    c = Client()
+    r = c.result("scan.run", cidrs=["10.0.0.0/29"], count=2, frag="rand:8-32@3")
+    c.wait_job(r["job"])
+    assert seen["scan"] == "rand:8-32@3"
+    r = c.result("sni.run", ips=["10.0.0.1"], snis=["a.example"], frag="7,8@1", http_check=False)
+    c.wait_job(r["job"])
+    assert seen["sni"] == ("list", [7, 8], 1.0)      # the search parses the spec before probing
+    for bad in (5, None, ["a"], "x" * 65, {"a": 1}):
+        for method, extra in (("scan.run", {"cidrs": ["10.0.0.0/29"]}),
+                              ("sni.run", {"ips": ["10.0.0.1"], "snis": ["a.example"]})):
+            assert c.call(method, frag=bad, **extra)["error"]["code"] == -32602, (method, bad)

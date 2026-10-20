@@ -26,6 +26,8 @@
     <span id="engine-status" class="muted" aria-live="polite">engine: connecting…</span>
   </header>
 
+  <datalist id="frag-presets"></datalist>
+
   <main>
     <!-- Configs -->
     <section id="tab-configs" class="tab" role="tabpanel">
@@ -175,6 +177,8 @@
         <button id="hc-start" class="primary">Run on configs</button>
         <button id="hc-cancel" disabled>Cancel</button>
         <button id="hc-tag" disabled title="Append the exit country, e.g. name[DE], to results that reported one (needs a proxy core)">Tag names [CC]</button>
+        <button id="hc-retest" disabled title="Re-run the health check on the selected rows (click a row; Ctrl/Cmd-click for several)">Retest selected</button>
+        <button id="hc-copy" disabled>Copy link</button>
         <button id="hc-keep" disabled>Keep passing → Configs</button>
       </div>
       <div class="row">
@@ -227,6 +231,7 @@
           <button id="sk-tagged" disabled>Show tagged lines</button>
           <button id="sk-load" disabled>Best N → Configs</button>
           <button id="sk-save">Save export…</button>
+          <button id="sk-copy" disabled title="Copy the selected row's link (click a row)">Copy link</button>
         </div>
         <div class="table-wrap short">
           <table id="sk-table">
@@ -273,10 +278,12 @@
         </div>
         <div class="col">
           <label>SNI (optional) <input id="sc-sni" type="text" size="22"></label>
+          <label>Fragment <input id="sc-frag" type="text" size="14" list="frag-presets" value="5,94,1@2"></label>
           <label>Workers <input id="sc-workers" type="number" min="1" max="256" value="64"></label>
         </div>
       </div>
       <div class="row">
+        <label>Add ranges <select id="sc-preset"><option value="">(preset)</option></select></label>
         <label><input id="sc-geo" type="checkbox"> Look up country / ISP</label>
         <label><input id="sc-dead" type="checkbox"> Show unreachable</label>
         <button id="sc-start" class="primary">Scan</button>
@@ -284,8 +291,10 @@
         <label>Saved scans <select id="sc-sessions"><option value="">(none)</option></select></label>
         <button id="sc-load">Load</button>
         <button id="sc-resume">Resume</button>
-        <button id="sc-export">Export CSV</button>
-        <button id="sc-save">Save CSV…</button>
+        <label>Format <select id="sc-fmt"><option value="csv">CSV</option><option value="json">JSON</option></select></label>
+        <button id="sc-export">Export</button>
+        <button id="sc-save">Save…</button>
+        <button id="sc-clear" title="Clear the table (saved scans are kept)">Clear</button>
         <button id="sc-to-sni">Alive IPs → SNI search</button>
       </div>
       <div class="row"><progress id="sc-progress" value="0" max="1"></progress><span id="sc-status" class="muted" role="status">idle</span></div>
@@ -314,11 +323,14 @@
         <label><input id="sn-http" type="checkbox" checked> HTTP check</label>
         <label>From saved scan <select id="sn-from-scan"><option value="">(none)</option></select></label>
         <label>Port <input id="sn-port" type="number" min="1" max="65535" value="443"></label>
+        <label>Fragment <input id="sn-frag" type="text" size="14" list="frag-presets" value="5,94,1@2"></label>
         <label>Workers <input id="sn-workers" type="number" min="1" max="256" value="32"></label>
         <button id="sn-start" class="primary">Search</button>
         <button id="sn-cancel" disabled>Cancel</button>
-        <button id="sn-export">Export CSV</button>
-        <button id="sn-save">Save CSV…</button>
+        <label>Format <select id="sn-fmt"><option value="csv">CSV</option><option value="json">JSON</option></select></label>
+        <button id="sn-export">Export</button>
+        <button id="sn-save">Save…</button>
+        <button id="sn-clear" title="Clear the table (saved searches are kept)">Clear</button>
       </div>
       <div class="row"><progress id="sn-progress" value="0" max="1"></progress><span id="sn-status" class="muted" role="status">idle</span></div>
       <div class="table-wrap">

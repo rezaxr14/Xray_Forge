@@ -49,6 +49,14 @@ def _port(v: Any) -> str:
     return str(_int(v, 1, 65535, "port"))
 
 
+def _frag(v: Any) -> str:
+    """Fragment spec such as ``5,94,1@2``, ``rand:8-32@3`` or ``off``.  The
+    parser is lenient on content, so only the type and length are checked."""
+    if not isinstance(v, str) or len(v) > 64:
+        raise invalid_params("frag must be a short string, e.g. 5,94,1@2, rand:8-32@3 or off")
+    return v.strip()
+
+
 def _str_list(v: Any, what: str) -> list[str]:
     if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
         raise invalid_params(f"{what} must be a list of strings")
@@ -167,6 +175,7 @@ def register(d: Dispatcher, jobs: JobManager) -> None:
         count = _int(count, 1, 5000, "count")
         workers = _int(workers, 1, 256, "workers")
         port = _port(port)
+        frag = _frag(frag)
         name = _new_session_name(session, "scan", "scans")
         sess = ScanSession(name)
         n = sess.set_targets(cidr_list, count, resume=bool(resume))
@@ -226,6 +235,7 @@ def register(d: Dispatcher, jobs: JobManager) -> None:
             raise invalid_params("too many (ip, sni) pairs")
         workers = _int(workers, 1, 256, "workers")
         port = _port(port)
+        frag = _frag(frag)
         name = _new_session_name(session, "sni", "sni_search")
         search = SniSearch(name)
         n = search.set_targets(ip_list, sni_list, port=port, resume=bool(resume))

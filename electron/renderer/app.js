@@ -416,30 +416,48 @@ $('#cv-send').addEventListener('click', () => guarded($('#cv-msg'), async () => 
 }));
 
 // ---------------------------------------------------------------- health
-function healthRow(r) {
-  return h('tr', { class: r.passed ? '' : 'bad' },
+// Rows are selectable (click = only this one, Ctrl/Cmd-click = toggle). Selection is a
+// Set of config lines so it survives the table being rebuilt while results stream in.
+function healthRow(r, sel) {
+  const cls = [r.passed ? '' : 'bad', sel && sel.has(r.line) ? 'selected' : ''].filter(Boolean).join(' ');
+  const tr = h('tr', { class: cls, onclick: (e) => {
+    if (!sel) return;
+    if (e.ctrlKey || e.metaKey) { if (sel.has(r.line)) sel.delete(r.line); else sel.add(r.line); tr.classList.toggle('selected'); }
+    else { sel.clear(); sel.add(r.line); tr.parentElement.querySelectorAll('tr.selected').forEach((x) => x.classList.remove('selected')); tr.classList.add('selected'); }
+    if (sel.onchange) sel.onchange();
+  } },
     h('td', {}, Math.round(r.score || 0)),
     h('td', {}, r.name || (r.line || '').slice(0, 40)),
     h('td', {}, r.scheme),
     h('td', {}, (r.stages || []).map((s) =>
       h('span', { class: `chip ${s.ok ? 'ok' : 'fail'}`, title: s.detail || '' }, `${s.name}${s.ms != null ? ' ' + Math.round(s.ms) + 'ms' : ''}`))),
     h('td', {}, (r.techniques || []).join(', ')));
+  return tr;
 }
 const byScore = (rows) => [...rows].sort((a, b) => (b.score || 0) - (a.score || 0));
 function renderHealth() {
-  $('#hc-table tbody').replaceChildren(...byScore(state.hcRows).map(healthRow));
+  $('#hc-table tbody').replaceChildren(...byScore(state.hcRows).map((r) => healthRow(r, hcSel)));
 }
 
 function setHcRunning(running) {
   $('#hc-start').disabled = running;
+  $('#hc-retest').disabled = running || hcSel.size === 0;
   $('#hc-cancel').disabled = !running;
 }
 
-$('#hc-start').addEventListener('click', () => guarded($('#hc-status'), async () => {
-  const lines = state.configs.filter((c) => c.ok).map((c) => c.line);
-  if (!lines.length) { say($('#hc-status'), 'No valid configs: parse some in the Configs tab first', true); return; }
-  state.hcRows = [];
+const hcSel = new Set();
+hcSel.onchange = () => {
+  $('#hc-retest').disabled = hcSel.size === 0 || $('#hc-start').disabled;
+  $('#hc-copy').disabled = hcSel.size !== 1;
+};
+
+// Run the health pipeline over `lines`; rows of those lines are replaced as new results stream in.
+async function runHealth(lines) {
+  const redo = new Set(lines);
+  state.hcRows = state.hcRows.filter((r) => !redo.has(r.line));
+  hcSel.clear();
   renderHealth();
+  hcSel.onchange();
   $('#hc-keep').disabled = true;
   $('#hc-tag').disabled = true;
   $('#hc-progress').value = 0;
@@ -451,18 +469,34 @@ $('#hc-start').addEventListener('click', () => guarded($('#hc-status'), async ()
     throughput: $('#hc-throughput').checked,
   };
   if ($('#hc-core').value) params.core = $('#hc-core').value;
-  state.hcJob = await runJob('health.run', params, (ev) => {
-    if (ev.type === 'item' && ev.data.line !== undefined) { state.hcRows.push(ev.data); renderHealth(); }
-    else if (ev.type === 'progress') { $('#hc-progress').max = ev.total; $('#hc-progress').value = ev.done; say($('#hc-status'), `${ev.done}/${ev.total}`); }
-    else if (ev.type === 'done') {
-      setHcRunning(false);
-      const passed = state.hcRows.filter((r) => r.passed).length;
-      say($('#hc-status'), `${ev.cancelled ? 'cancelled' : 'done'}: ${passed} of ${state.hcRows.length} passed`);
-      $('#hc-keep').disabled = passed === 0;
-      $('#hc-tag').disabled = !state.hcRows.some(hcCountry);
-    } else if (ev.type === 'error') { setHcRunning(false); say($('#hc-status'), ev.message, true); }
-  });
+  try {
+    state.hcJob = await runJob('health.run', params, (ev) => {
+      if (ev.type === 'item' && ev.data.line !== undefined) { state.hcRows.push(ev.data); renderHealth(); }
+      else if (ev.type === 'progress') { $('#hc-progress').max = ev.total; $('#hc-progress').value = ev.done; say($('#hc-status'), `${ev.done}/${ev.total}`); }
+      else if (ev.type === 'done') {
+        setHcRunning(false);
+        const passed = state.hcRows.filter((r) => r.passed).length;
+        say($('#hc-status'), `${ev.cancelled ? 'cancelled' : 'done'}: ${passed} of ${state.hcRows.length} passed`);
+        $('#hc-keep').disabled = passed === 0;
+        $('#hc-tag').disabled = !state.hcRows.some(hcCountry);
+      } else if (ev.type === 'error') { setHcRunning(false); say($('#hc-status'), ev.message, true); }
+    });
+  } catch (e) { setHcRunning(false); throw e; }   // a refused start must not leave Run disabled
+}
+$('#hc-start').addEventListener('click', () => guarded($('#hc-status'), async () => {
+  const lines = state.configs.filter((c) => c.ok).map((c) => c.line);
+  if (!lines.length) { say($('#hc-status'), 'No valid configs: parse some in the Configs tab first', true); return; }
+  state.hcRows = [];
+  await runHealth(lines);
 }));
+$('#hc-retest').addEventListener('click', () => guarded($('#hc-status'), async () => {
+  if (!hcSel.size) { say($('#hc-status'), 'select rows to retest (Ctrl/Cmd-click for several)'); return; }
+  await runHealth([...hcSel]);
+}));
+$('#hc-copy').addEventListener('click', () => {
+  if (hcSel.size !== 1) return;
+  copyText([...hcSel][0], $('#hc-status'), 'link');
+});
 $('#hc-cancel').addEventListener('click', () => { if (state.hcJob) window.forge.call('job.cancel', { job: state.hcJob }); });
 // Exit country reported by the core-backed request stage, if any.
 const hcCountry = (r) => {
@@ -481,7 +515,9 @@ $('#hc-tag').addEventListener('click', () => guarded($('#hc-status'), async () =
     row.line = it.line;
     if (it.name) row.name = it.name;
   });
+  hcSel.clear();
   renderHealth();
+  hcSel.onchange();
   say($('#hc-status'), `tagged ${res.tagged} config name(s) with [exit-country]`);
 }));
 
@@ -529,16 +565,17 @@ $('#sub-load').addEventListener('click', () => guarded($('#sub-msg'), async () =
 
 // Check every enabled source (engine-side: configs never cross the pipe) and
 // export the best N from the engine's own scores.
-const sk = { rows: [], job: '' };
+const sk = { rows: [], job: '', sel: new Set() };
+sk.sel.onchange = () => { $('#sk-copy').disabled = sk.sel.size !== 1; };
 const skSetRunning = (on) => { $('#sk-start').disabled = on; $('#sk-cancel').disabled = !on; };
-const skRender = () => $('#sk-table tbody').replaceChildren(...byScore(sk.rows).filter((r) => r.line !== undefined).map(healthRow));
+const skRender = () => $('#sk-table tbody').replaceChildren(...byScore(sk.rows).filter((r) => r.line !== undefined).map((r) => healthRow(r, sk.sel)));
 const skOpts = () => {
   const o = { workers: Number($('#sk-workers').value), timeout: Number($('#sk-timeout').value), throughput: $('#sk-throughput').checked };
   if ($('#sk-core').value) o.core = $('#sk-core').value;
   return o;
 };
 $('#sk-start').addEventListener('click', () => guarded($('#sk-status'), async () => {
-  sk.rows = []; sk.job = '';
+  sk.rows = []; sk.job = ''; sk.sel.clear(); sk.sel.onchange();
   skRender();
   $('#sk-out').value = '';
   ['#sk-export', '#sk-tagged', '#sk-load'].forEach((b) => { $(b).disabled = true; });
@@ -561,6 +598,7 @@ $('#sk-start').addEventListener('click', () => guarded($('#sk-status'), async ()
     }, r.job);
   } catch (e) { skSetRunning(false); throw e; }
 }));
+$('#sk-copy').addEventListener('click', () => { if (sk.sel.size === 1) copyText([...sk.sel][0], $('#sk-status'), 'link'); });
 $('#sk-cancel').addEventListener('click', () => { if (sk.job) window.forge.call('job.cancel', { job: sk.job }); });
 const skTopN = () => Number($('#sk-n').value);
 $('#sk-export').addEventListener('click', () => guarded($('#sk-status'), async () => {
@@ -666,6 +704,7 @@ async function startScan(resume) {
     workers: Number($('#sc-workers').value), geo: $('#sc-geo').checked,
   };
   if ($('#sc-sni').value.trim()) params.sni = $('#sc-sni').value.trim();
+  params.frag = $('#sc-frag').value.trim() || 'off';
   if (resume) { params.resume = true; params.session = $('#sc-sessions').value; }
   const r = await call('scan.run', params);
   sc.rows = new Map();
@@ -701,8 +740,22 @@ $('#sc-load').addEventListener('click', () => guarded($('#sc-status'), async () 
 $('#sc-export').addEventListener('click', () => guarded($('#sc-status'), async () => {
   const name = $('#sc-sessions').value;
   if (!name) { say($('#sc-status'), 'choose a saved scan to export', true); return; }
-  $('#sc-out').value = (await call('scan.export', { session: name, format: 'csv' })).content;
+  $('#sc-out').value = (await call('scan.export', { session: name, format: $('#sc-fmt').value })).content;
 }));
+$('#sc-clear').addEventListener('click', () => {
+  sc.rows = new Map(); clearScanSelection(); renderScan(); $('#sc-out').value = '';
+  say($('#sc-status'), 'cleared (saved scans are kept)');
+});
+$('#sc-preset').addEventListener('change', () => {
+  const key = $('#sc-preset').value;
+  const ranges = (state.info && state.info.ranges && state.info.ranges[key]) || [];
+  const have = new Set(linesOf($('#sc-cidrs').value));
+  const add = ranges.filter((c) => !have.has(c));
+  $('#sc-cidrs').value = [...have, ...add].join('\n');
+  $('#sc-cidrs').dispatchEvent(new Event('input', { bubbles: true }));
+  $('#sc-preset').value = '';
+  say($('#sc-status'), key ? `added ${add.length} ${key} range(s)` : '');
+});
 $('#sc-to-sni').addEventListener('click', () => {
   const ips = [...sc.rows.values()].filter((r) => r.alive).sort((a, b) => a.ms - b.ms).map((r) => r.ip);
   $('#sn-ips').value = ips.join('\n');
@@ -795,6 +848,7 @@ $('#sn-start').addEventListener('click', () => guarded($('#sn-status'), async ()
     snis: linesOf($('#sn-snis').value.replace(/[,\s]+/g, '\n')),
     presets: $('#sn-presets').checked, http_check: $('#sn-http').checked,
     port: $('#sn-port').value, workers: Number($('#sn-workers').value),
+    frag: $('#sn-frag').value.trim() || 'off',
   };
   if ($('#sn-from-scan').value) params.from_scan = $('#sn-from-scan').value;
   const r = await call('sni.run', params);
@@ -814,8 +868,12 @@ $('#sn-start').addEventListener('click', () => guarded($('#sn-status'), async ()
 $('#sn-cancel').addEventListener('click', () => { if (sn.job) call('job.cancel', { job: sn.job }); });
 $('#sn-export').addEventListener('click', () => guarded($('#sn-status'), async () => {
   if (!sn.session) { say($('#sn-status'), 'run a search first', true); return; }
-  $('#sn-out').value = (await call('sni.export', { session: sn.session, format: 'csv' })).content;
+  $('#sn-out').value = (await call('sni.export', { session: sn.session, format: $('#sn-fmt').value })).content;
 }));
+$('#sn-clear').addEventListener('click', () => {
+  sn.rows = new Map(); clearSniSelection(); renderSni(); $('#sn-out').value = '';
+  say($('#sn-status'), 'cleared (saved searches are kept)');
+});
 onTab.sni = refreshScanSessions;
 
 // ------------------------------------------------------------------ WARP
@@ -920,8 +978,8 @@ $('#export-save').addEventListener('click', () => guarded($('#export-msg'), () =
   return saveTextAs($('#export-out').value, name, kind, $('#export-msg'));
 }));
 $('#sk-save').addEventListener('click', () => guarded($('#sk-status'), () => saveTextAs($('#sk-out').value, 'best_sub.txt', 'text', $('#sk-status'))));
-$('#sc-save').addEventListener('click', () => guarded($('#sc-status'), () => saveTextAs($('#sc-out').value, `${$('#sc-sessions').value || 'scan'}.csv`, 'csv', $('#sc-status'))));
-$('#sn-save').addEventListener('click', () => guarded($('#sn-status'), () => saveTextAs($('#sn-out').value, `${sn.session || 'sni_search'}.csv`, 'csv', $('#sn-status'))));
+$('#sc-save').addEventListener('click', () => guarded($('#sc-status'), () => saveTextAs($('#sc-out').value, `${$('#sc-sessions').value || 'scan'}.${$('#sc-fmt').value}`, $('#sc-fmt').value, $('#sc-status'))));
+$('#sn-save').addEventListener('click', () => guarded($('#sn-status'), () => saveTextAs($('#sn-out').value, `${sn.session || 'sni_search'}.${$('#sn-fmt').value}`, $('#sn-fmt').value, $('#sn-status'))));
 
 // ------------------------------------------------------------------ boot
 (async () => {
@@ -932,6 +990,9 @@ $('#sn-save').addEventListener('click', () => guarded($('#sn-status'), () => sav
     cvResetRules();
     $('#cv-keys').textContent = (state.info.template_keys || []).map((k) => `{${k}}`).join(' ');
     for (const c of state.info.cores) { $('#hc-core').append(h('option', { value: c }, c)); $('#sk-core').append(h('option', { value: c }, c)); }
+    for (const f of state.info.frag_presets || []) $('#frag-presets').append(h('option', { value: f }));
+    const labels = { cloudflare: 'Cloudflare', fastly: 'Fastly', warp: 'WARP' };
+    for (const k of Object.keys(state.info.ranges || {})) $('#sc-preset').append(h('option', { value: k }, labels[k] || k));
     await loadSettings();
   } catch (e) {
     $('#engine-status').textContent = `engine unavailable: ${e.message}`;
@@ -947,8 +1008,8 @@ const PERSIST = [
   'cv-fp', 'cv-cs', 'cv-fm', 'cv-template', 'cv-start', 'cv-ip-on', 'cv-ip', 'cv-port-on', 'cv-port',
   'export-format', 'hc-workers', 'hc-timeout', 'hc-core', 'hc-throughput',
   'sk-workers', 'sk-timeout', 'sk-core', 'sk-throughput', 'sk-n',
-  'sc-cidrs', 'sc-count', 'sc-port', 'sc-sni', 'sc-workers', 'sc-geo', 'sc-dead',
-  'sn-snis', 'sn-presets', 'sn-http', 'sn-port', 'sn-workers',
+  'sc-cidrs', 'sc-count', 'sc-port', 'sc-sni', 'sc-frag', 'sc-workers', 'sc-geo', 'sc-dead', 'sc-fmt',
+  'sn-snis', 'sn-presets', 'sn-http', 'sn-port', 'sn-frag', 'sn-workers', 'sn-fmt',
   'wp-count', 'wp-format', 'mt-use-ca', 'mt-platform', 'mt-cn', 'mt-permitted',
 ];
 // `ready` is false until the saved values are restored, so the events fired while

@@ -243,6 +243,11 @@ test('IP scanner rejects bad input with a readable message', opts, async () => {
 test('SNI search probes pairs and reports none working on a closed port', opts, async () => {
   const { page, problems, close } = await launch();
   try {
+    await page.evaluate(() => {
+      window.__sent = {};
+      const real = window.forge.call;
+      window.forge.call = (m, p) => { window.__sent[m] = p; return real(m, p); };
+    });
     await page.click('[data-tab=sni]');
     await page.fill('#sn-ips', '127.0.0.1');
     await page.fill('#sn-snis', 'a.example, b.example');
@@ -1001,5 +1006,150 @@ test('settings: a value the engine refuses is reported, not swallowed', opts, as
     await page.click('[data-tab=health]');
     await page.fill('#hc-workers', '3');
     await page.waitForFunction(() => /disk full/.test(document.querySelector('#settings-msg').textContent));
+  } finally { await close(); }
+});
+
+// ------------------------------------------------------------ step 5.6a (parity gaps)
+test('scan: fragment field, range presets, JSON export/save and Clear', opts, async () => {
+  const { page, problems, close, dialogs } = await launch();
+  try {
+    await ready(page);
+    await page.evaluate(() => {
+      window.__sent = {};
+      const real = window.forge.call;
+      window.forge.call = (m, p) => { window.__sent[m] = p; return real(m, p); };
+    });
+    await page.click('[data-tab=scan]');
+    assert.ok(await page.locator('#frag-presets option').count() >= 4);
+    assert.equal(await page.inputValue('#sc-frag'), '5,94,1@2');
+    await page.selectOption('#sc-preset', 'cloudflare');
+    const first = (await page.inputValue('#sc-cidrs')).split('\n');
+    assert.ok(first.length >= 5 && first.includes('104.16.0.0/13'));
+    await page.selectOption('#sc-preset', 'cloudflare');          // adding again changes nothing
+    assert.deepEqual((await page.inputValue('#sc-cidrs')).split('\n'), first);
+    assert.match(await page.textContent('#sc-status'), /added 0 cloudflare/);
+    assert.equal(await page.inputValue('#sc-preset'), '');
+
+    await page.fill('#sc-cidrs', '127.0.0.1/32');
+    await page.fill('#sc-port', '9');
+    await page.fill('#sc-frag', 'rand:8-32@3');
+    await page.check('#sc-dead');
+    await page.click('#sc-start');
+    await page.waitForFunction(() => /^done/.test(document.querySelector('#sc-status').textContent), null, { timeout: 30000 });
+    assert.equal(await page.evaluate(() => window.__sent['scan.run'].frag), 'rand:8-32@3');
+    await page.waitForFunction(() => document.querySelectorAll('#sc-sessions option').length > 1);
+    await page.selectOption('#sc-sessions', { index: 1 });
+    await page.selectOption('#sc-fmt', 'json');
+    await page.click('#sc-export');
+    await page.waitForFunction(() => document.querySelector('#sc-out').value.length > 0);
+    const parsed = JSON.parse(await page.inputValue('#sc-out'));
+    assert.ok(JSON.stringify(parsed).includes('127.0.0.1'));
+
+    dialogs.save.push({ canceled: true });
+    await page.click('#sc-save');
+    await page.waitForFunction(() => /save cancelled/.test(document.querySelector('#sc-status').textContent));
+    const [kind, o] = dialogs.seen.at(-1);
+    assert.equal(kind, 'save');
+    assert.match(o.defaultPath, /\.json$/);
+    assert.equal(o.filters[0].name, 'JSON');
+
+    await page.click('#sc-clear');
+    assert.equal(await page.locator('#sc-table tbody tr').count(), 0);
+    assert.equal(await page.inputValue('#sc-out'), '');
+    assert.ok(await page.locator('#sc-sessions option').count() > 1);   // saved scans are kept
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('SNI search: fragment field, JSON export and Clear', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await ready(page);
+    await page.evaluate(() => {
+      window.__sent = {};
+      const real = window.forge.call;
+      window.forge.call = (m, p) => { window.__sent[m] = p; return real(m, p); };
+    });
+    await page.click('[data-tab=sni]');
+    await page.fill('#sn-ips', '127.0.0.1');
+    await page.fill('#sn-snis', 'a.example');
+    await page.fill('#sn-port', '9');
+    await page.fill('#sn-frag', 'off');
+    await page.click('#sn-start');
+    await page.waitForFunction(() => /^done/.test(document.querySelector('#sn-status').textContent), null, { timeout: 30000 });
+    assert.equal(await page.evaluate(() => window.__sent['sni.run'].frag), 'off');
+    await page.selectOption('#sn-fmt', 'json');
+    await page.click('#sn-export');
+    await page.waitForFunction(() => document.querySelector('#sn-out').value.length > 0);
+    JSON.parse(await page.inputValue('#sn-out'));
+    await page.click('#sn-clear');
+    assert.equal(await page.locator('#sn-table tbody tr').count(), 0);
+    assert.equal(await page.inputValue('#sn-out'), '');
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('health: select rows, copy a link, retest only the selected ones', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await ready(page);
+    await stubClipboard(page);
+    const dead2 = DEAD.replace('127.0.0.1:9', '127.0.0.1:19').replace('#dead', '#dead2');
+    await page.evaluate(() => {
+      window.__runs = [];
+      const real = window.forge.call;
+      window.forge.call = (m, p) => { if (m === 'health.run') window.__runs.push(p.lines.length); return real(m, p); };
+    });
+    await page.fill('#cfg-input', `${DEAD}\n${dead2}`);
+    await page.click('#cfg-parse');
+    await page.waitForFunction(() => document.querySelectorAll('#cfg-table tbody tr').length === 2);
+    await page.click('[data-tab=health]');
+    await page.fill('#hc-timeout', '1');
+    await page.uncheck('#hc-throughput');
+    assert.equal(await page.isDisabled('#hc-retest'), true);
+    assert.equal(await page.isDisabled('#hc-copy'), true);
+    await page.click('#hc-start');
+    await page.waitForFunction(() => /^done: 0 of 2/.test(document.querySelector('#hc-status').textContent), null, { timeout: 30000 });
+
+    await page.click('#hc-table tbody tr:nth-child(1)');
+    assert.equal(await page.locator('#hc-table tbody tr.selected').count(), 1);
+    assert.equal(await page.isDisabled('#hc-copy'), false);
+    await page.click('#hc-copy');
+    await page.waitForFunction(() => window.__clip.length === 1);
+    const copied = await page.evaluate(() => window.__clip[0]);
+    assert.ok(copied === DEAD || copied === dead2);
+
+    await page.click('#hc-table tbody tr:nth-child(2)', { modifiers: ['Control'] });
+    assert.equal(await page.locator('#hc-table tbody tr.selected').count(), 2);
+    assert.equal(await page.isDisabled('#hc-copy'), true);       // copy needs exactly one row
+    await page.click('#hc-table tbody tr:nth-child(2)', { modifiers: ['Control'] });   // toggle off
+    assert.equal(await page.locator('#hc-table tbody tr.selected').count(), 1);
+
+    await page.click('#hc-retest');
+    await page.waitForFunction(() => window.__runs.length === 2);
+    await page.waitForFunction(() => /^done: 0 of 2/.test(document.querySelector('#hc-status').textContent), null, { timeout: 30000 });
+    assert.deepEqual(await page.evaluate(() => window.__runs), [2, 1]);     // all, then only the selected one
+    assert.equal(await page.locator('#hc-table tbody tr').count(), 2);       // the other row was kept
+    assert.equal(await page.isDisabled('#hc-start'), false);
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('subscriptions check table: select a row and copy its link', opts, async () => {
+  const { page, close } = await launch();
+  try {
+    await ready(page);
+    await stubClipboard(page);
+    await page.click('[data-tab=subs]');
+    await page.evaluate((line) => {
+      sk.rows = [{ line, name: 'ok', scheme: 'vless', score: 80, passed: true, stages: [] },
+                 { line: line + 'x', name: 'two', scheme: 'vless', score: 10, passed: false, stages: [] }];
+      skRender();
+    }, VLESS);
+    assert.equal(await page.isDisabled('#sk-copy'), true);
+    await page.click('#sk-table tbody tr:nth-child(1)');
+    await page.click('#sk-copy');
+    await page.waitForFunction(() => window.__clip.length === 1);
+    assert.equal(await page.evaluate(() => window.__clip[0]), VLESS);
   } finally { await close(); }
 });

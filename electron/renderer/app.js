@@ -416,16 +416,18 @@ $('#cv-send').addEventListener('click', () => guarded($('#cv-msg'), async () => 
 }));
 
 // ---------------------------------------------------------------- health
+function healthRow(r) {
+  return h('tr', { class: r.passed ? '' : 'bad' },
+    h('td', {}, Math.round(r.score || 0)),
+    h('td', {}, r.name || (r.line || '').slice(0, 40)),
+    h('td', {}, r.scheme),
+    h('td', {}, (r.stages || []).map((s) =>
+      h('span', { class: `chip ${s.ok ? 'ok' : 'fail'}`, title: s.detail || '' }, `${s.name}${s.ms != null ? ' ' + Math.round(s.ms) + 'ms' : ''}`))),
+    h('td', {}, (r.techniques || []).join(', ')));
+}
+const byScore = (rows) => [...rows].sort((a, b) => (b.score || 0) - (a.score || 0));
 function renderHealth() {
-  const rows = [...state.hcRows].sort((a, b) => (b.score || 0) - (a.score || 0));
-  $('#hc-table tbody').replaceChildren(...rows.map((r) =>
-    h('tr', { class: r.passed ? '' : 'bad' },
-      h('td', {}, Math.round(r.score || 0)),
-      h('td', {}, r.name || r.line.slice(0, 40)),
-      h('td', {}, r.scheme),
-      h('td', {}, (r.stages || []).map((s) =>
-        h('span', { class: `chip ${s.ok ? 'ok' : 'fail'}`, title: s.detail || '' }, `${s.name}${s.ms != null ? ' ' + Math.round(s.ms) + 'ms' : ''}`))),
-      h('td', {}, (r.techniques || []).join(', ')))));
+  $('#hc-table tbody').replaceChildren(...byScore(state.hcRows).map(healthRow));
 }
 
 function setHcRunning(running) {
@@ -511,13 +513,70 @@ $('#sub-add').addEventListener('click', () => guarded($('#sub-msg'), async () =>
 $('#sub-fetch').addEventListener('click', () => guarded($('#sub-msg'), async () => {
   say($('#sub-msg'), 'fetching…');
   await runJob('sub.fetch', {}, async (ev) => {
-    if (ev.type === 'done') { say($('#sub-msg'), 'fetched'); await refreshSubs(); }
+    if (ev.type === 'done') {
+      const t = ev.result || {};
+      say($('#sub-msg'), t.total !== undefined ? `fetched: ${t.total} configs (${t.removed} duplicates removed)` : 'fetched');
+      await refreshSubs();
+    }
     else if (ev.type === 'error') say($('#sub-msg'), ev.message, true);
   });
 }));
 $('#sub-load').addEventListener('click', () => guarded($('#sub-msg'), async () => {
   const r = await window.forge.call('sub.configs', { dedupe: true });
   await setConfigs(r.lines);
+  document.querySelector('[data-tab=configs]').click();
+}));
+
+// Check every enabled source (engine-side: configs never cross the pipe) and
+// export the best N from the engine's own scores.
+const sk = { rows: [], job: '' };
+const skSetRunning = (on) => { $('#sk-start').disabled = on; $('#sk-cancel').disabled = !on; };
+const skRender = () => $('#sk-table tbody').replaceChildren(...byScore(sk.rows).filter((r) => r.line !== undefined).map(healthRow));
+const skOpts = () => {
+  const o = { workers: Number($('#sk-workers').value), timeout: Number($('#sk-timeout').value), throughput: $('#sk-throughput').checked };
+  if ($('#sk-core').value) o.core = $('#sk-core').value;
+  return o;
+};
+$('#sk-start').addEventListener('click', () => guarded($('#sk-status'), async () => {
+  sk.rows = []; sk.job = '';
+  skRender();
+  $('#sk-out').value = '';
+  ['#sk-export', '#sk-tagged', '#sk-load'].forEach((b) => { $(b).disabled = true; });
+  skSetRunning(true);
+  say($('#sk-status'), 'starting…');
+  try {
+    const r = await window.forge.call('sub.check', skOpts());
+    sk.job = r.job;
+    $('#sk-progress').max = r.total; $('#sk-progress').value = 0;
+    say($('#sk-status'), `checking ${r.total} configs (${r.removed} duplicates removed)…`);
+    await runJob('sub.check', {}, (ev) => {
+      if (ev.type === 'item') { sk.rows.push(ev.data); skRender(); }
+      else if (ev.type === 'progress') { $('#sk-progress').max = ev.total; $('#sk-progress').value = ev.done; say($('#sk-status'), `${ev.done}/${ev.total}`); }
+      else if (ev.type === 'done') {
+        skSetRunning(false);
+        const passed = sk.rows.filter((x) => x.passed).length;
+        say($('#sk-status'), `${ev.cancelled ? 'cancelled' : 'done'}: ${passed} of ${sk.rows.filter((x) => x.line !== undefined).length} passed`);
+        ['#sk-export', '#sk-tagged', '#sk-load'].forEach((b) => { $(b).disabled = passed === 0; });
+      } else if (ev.type === 'error') { skSetRunning(false); say($('#sk-status'), ev.message, true); }
+    }, r.job);
+  } catch (e) { skSetRunning(false); throw e; }
+}));
+$('#sk-cancel').addEventListener('click', () => { if (sk.job) window.forge.call('job.cancel', { job: sk.job }); });
+const skTopN = () => Number($('#sk-n').value);
+$('#sk-export').addEventListener('click', () => guarded($('#sk-status'), async () => {
+  const r = await window.forge.call('health.export_best', { job: sk.job, top_n: skTopN() });
+  $('#sk-out').value = r.content;
+  say($('#sk-status'), r.count ? `best ${r.count} working config(s) as a base64 subscription` : 'no working configs to export', !r.count);
+  if (r.content) copyText(r.content, $('#sk-status'), `subscription (${r.count} configs)`);
+}));
+$('#sk-tagged').addEventListener('click', () => guarded($('#sk-status'), async () => {
+  const r = await window.forge.call('health.tagged', { job: sk.job });
+  $('#sk-out').value = r.lines.join('\n');
+  say($('#sk-status'), `${r.lines.length} working config(s), names tagged with the techniques that worked`);
+}));
+$('#sk-load').addEventListener('click', () => guarded($('#sk-status'), async () => {
+  const r = await window.forge.call('health.tagged', { job: sk.job });
+  await setConfigs(r.lines.slice(0, skTopN()));
   document.querySelector('[data-tab=configs]').click();
 }));
 
@@ -839,7 +898,7 @@ $('#mt-ca').addEventListener('click', () => guarded($('#mt-msg'), async () => {
     cv.defaults = state.info.defaults;
     cvResetRules();
     $('#cv-keys').textContent = (state.info.template_keys || []).map((k) => `{${k}}`).join(' ');
-    for (const c of state.info.cores) $('#hc-core').append(h('option', { value: c }, c));
+    for (const c of state.info.cores) { $('#hc-core').append(h('option', { value: c }, c)); $('#sk-core').append(h('option', { value: c }, c)); }
   } catch (e) {
     $('#engine-status').textContent = `engine unavailable: ${e.message}`;
   }

@@ -102,7 +102,15 @@ See `docs/engine-api.md`.
     two runs started within a second shared a session and the second failed
     with "no scannable IPs" (found as a flaky e2e test; now unique, with a
     regression test).
-  - ⬜ 5.4 Subscriptions: best-N export, check-all-sources.
+  - ✅ 5.4 Subscriptions: best-N export, check-all-sources. `sub.check` runs the
+    health pipeline over the cached configs of all enabled sources inside the
+    engine; `health.export_best` / `health.tagged` use the engine's own scores
+    (the last 4 runs are kept). Core fixes found on the way, which also change
+    the Tk GUI and the CLI: best-N used to take the top N *then* drop failures
+    (so it could return fewer than N, or none); technique tags were appended
+    inside the URL query and corrupted links -- they now go into the name
+    (VMess: the `ps` field). Tests: Python + 2 e2e (the export/tag UI test stubs
+    only those two engine methods, since CI has no reachable working server).
   - ⬜ 5.5 File open/save dialogs, settings persistence.
   - ⬜ 5.6 Retire the Tk GUI once parity holds.
 

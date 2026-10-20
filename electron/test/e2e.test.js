@@ -753,3 +753,74 @@ test('SNI results: copy IP + SNI and use the IP as FORCE IP', opts, async () => 
     assert.deepEqual(problems, []);
   } finally { await close(); }
 });
+
+// ------------------------------------------------------------ step 5.4
+test('subscriptions: check-all-sources needs fetched configs, then streams results', opts, async () => {
+  const { page, problems, close } = await launch();
+  const sub = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'text/plain' }); res.end(`${DEAD}\n${DEAD}\n`); });
+  await new Promise((r) => sub.listen(0, '127.0.0.1', r));
+  try {
+    await page.click('[data-tab=subs]');
+    assert.equal(await page.isDisabled('#sk-export'), true);
+    await page.click('#sk-start');
+    await page.waitForFunction(() => /fetch the sources first/.test(document.querySelector('#sk-status').textContent));
+    assert.equal(await page.isDisabled('#sk-start'), false);   // a refused start must not leave it locked
+
+    await page.fill('#sub-url', `http://127.0.0.1:${sub.address().port}/s`);
+    await page.click('#sub-add');
+    await page.waitForSelector('#sub-table tbody tr');
+    await page.click('#sub-fetch');
+    await page.waitForFunction(() => /fetched: 1 configs \(1 duplicates removed\)/.test(document.querySelector('#sub-msg').textContent), null, { timeout: 30000 });
+
+    await page.fill('#sk-timeout', '1');
+    await page.uncheck('#sk-throughput');
+    await page.click('#sk-start');
+    await page.waitForFunction(() => /^done/.test(document.querySelector('#sk-status').textContent), null, { timeout: 30000 });
+    assert.match(await page.textContent('#sk-status'), /done: 0 of 1 passed/);
+    assert.equal(await page.locator('#sk-table tbody tr').count(), 1);
+    assert.ok(await page.locator('#sk-table .chip.fail').count() >= 1);
+    for (const b of ['#sk-export', '#sk-tagged', '#sk-load']) assert.equal(await page.isDisabled(b), true);
+    assert.equal(await page.isDisabled('#sk-start'), false);
+    assert.deepEqual(problems.filter((p) => !/Failed to load resource/.test(p)), []);
+  } finally { sub.close(); await close(); }
+});
+
+test('subscriptions: export best N, tagged lines and best N → Configs', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.waitForFunction(() => /engine v\d/.test(document.querySelector('#engine-status').textContent));
+    await stubClipboard(page);
+    await page.click('[data-tab=subs]');
+    // The run store needs working configs, which CI cannot reach; stub just
+    // these two engine methods (their behaviour is covered by the Python tests)
+    // and check what the UI sends and does with the answers.
+    await page.evaluate((line) => {
+      window.__calls = [];
+      const real = window.forge.call;
+      window.forge.call = (m, p) => {
+        if (m === 'health.export_best') { window.__calls.push([m, p]); return Promise.resolve({ content: 'QUJD', count: 2 }); }
+        if (m === 'health.tagged') { window.__calls.push([m, p]); return Promise.resolve({ lines: [line + '%20%5Bfragment%5D', line + 'b', line + 'c'] }); }
+        return real(m, p);
+      };
+      sk.job = 'job-7';
+      sk.rows = [{ line, name: 'ok', scheme: 'vless', score: 80, passed: true, stages: [], techniques: ['fragment'] }];
+      skRender();
+      ['#sk-export', '#sk-tagged', '#sk-load'].forEach((b) => { document.querySelector(b).disabled = false; });
+    }, VLESS);
+    await page.fill('#sk-n', '2');
+    await page.click('#sk-export');
+    await page.waitForFunction(() => document.querySelector('#sk-out').value === 'QUJD');
+    assert.match(await page.textContent('#sk-status'), /subscription \(2 configs\) copied/);
+    assert.deepEqual(await page.evaluate(() => window.__clip), ['QUJD']);
+    assert.deepEqual(await page.evaluate(() => window.__calls[0]), ['health.export_best', { job: 'job-7', top_n: 2 }]);
+
+    await page.click('#sk-tagged');
+    await page.waitForFunction(() => /^3 working/.test(document.querySelector('#sk-status').textContent));
+    assert.equal((await page.inputValue('#sk-out')).split('\n').length, 3);
+    assert.deepEqual(await page.evaluate(() => window.__calls[1]), ['health.tagged', { job: 'job-7' }]);
+
+    await page.click('#sk-load');                      // best N=2 of the 3 tagged lines
+    await page.waitForFunction(() => document.querySelectorAll('#cfg-table tbody tr').length === 2);
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});

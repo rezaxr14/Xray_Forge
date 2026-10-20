@@ -199,6 +199,36 @@
           <tbody></tbody>
         </table>
       </div>
+      <fieldset class="rules" id="sk-box">
+        <legend>Check all sources</legend>
+        <div class="row">
+          <label>Workers <input id="sk-workers" type="number" min="1" max="64" value="8"></label>
+          <label>Timeout (s) <input id="sk-timeout" type="number" min="1" max="60" value="6"></label>
+          <label>Core
+            <select id="sk-core"><option value="">native only</option><option value="auto">auto</option></select>
+          </label>
+          <label><input id="sk-throughput" type="checkbox" checked> Throughput</label>
+          <button id="sk-start" class="primary" title="Health-check the cached configs of every enabled source (fetch first)">Check all sources</button>
+          <button id="sk-cancel" disabled>Cancel</button>
+        </div>
+        <div class="row">
+          <progress id="sk-progress" value="0" max="1"></progress>
+          <span id="sk-status" class="muted" role="status">idle</span>
+        </div>
+        <div class="row">
+          <label>Best N <input id="sk-n" type="number" min="1" max="1000" value="10"></label>
+          <button id="sk-export" disabled>Export best N (base64)</button>
+          <button id="sk-tagged" disabled>Show tagged lines</button>
+          <button id="sk-load" disabled>Best N → Configs</button>
+        </div>
+        <div class="table-wrap short">
+          <table id="sk-table">
+            <thead><tr><th>Score</th><th>Name</th><th>Scheme</th><th>Stages</th><th>Techniques</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <textarea id="sk-out" rows="4" readonly aria-label="export output" placeholder="exported subscription / tagged lines appear here"></textarea>
+      </fieldset>
     </section>
 
     <!-- IP scanner -->

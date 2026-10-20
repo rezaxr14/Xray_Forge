@@ -34,8 +34,11 @@ cancels everything and shuts the engine down.
 | `config.export` | `lines`, `format` (`clash`/`singbox`/`sub`) | `{content, count}` |
 | `config.dedup` | `lines` | `{lines, removed}` |
 | `sub.list/add/remove/set_enabled/configs` | see code | source state |
-| `sub.fetch` | `force`, `timeout` | job |
-| `health.run` | `lines`, `workers`, `timeout`, `throughput`, `core` | job; items are reports |
+| `sub.fetch` | `force`, `timeout` | job; result `{counts, total, removed}` |
+| `health.run` | `lines`, `workers` (1..64), `timeout` (0.5..120), `throughput`, `core` | job; items are reports. The reports of the last 4 runs are kept by the engine |
+| `sub.check` | `workers`, `timeout`, `throughput`, `core` | `{job, total, removed}`; `health.run` over the cached configs of every enabled source (errors with "no cached configs: fetch the sources first") |
+| `health.export_best` | `job`, `top_n` (1..1000, default 10) | `{content, count}`; base64 subscription of the best *working* configs of a run (also while it is still running) |
+| `health.tagged` | `job`, `min_score` (0..100) | `{lines}`; working configs, best first, names tagged with the techniques that worked, e.g. `name [fragment:5,94,1@2]` |
 | `scan.run` | `cidrs`, `count`, `port`, `sni`, `workers`, `frag`, `geo`, `timeout`, `session`, `resume` | `{job, session, targets}`; items are scan results |
 | `scan.sessions` / `scan.get` / `scan.export` | `session`, `format` (`csv`/`json`) | saved scan data |
 | `sni.run` | `ips`, `snis`, `presets`, `from_scan`, `port`, `workers`, `frag`, `timeout`, `http_check`, `session`, `resume` | `{job, session, pairs}`; items are hits |

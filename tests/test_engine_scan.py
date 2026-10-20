@@ -275,7 +275,9 @@ def test_explicit_session_names_are_used_as_given(monkeypatch):
     r = c.result("scan.run", cidrs=["10.0.0.0/29"], count=4, session="mine")
     c.wait_job(r["job"])
     assert r["session"] == "mine"
-    again = c.result("scan.run", cidrs=["10.0.0.0/29"], count=4, session="mine")
+    # another range: re-sampling the same /29 could pick exactly the IPs already
+    # scanned (1 in 70), leaving nothing fresh and failing at random
+    again = c.result("scan.run", cidrs=["10.0.1.0/29"], count=4, session="mine")
     assert again["session"] == "mine"            # explicit names keep their meaning (resume)
     c.wait_job(again["job"])
 

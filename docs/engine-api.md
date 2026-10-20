@@ -46,7 +46,7 @@ cancels everything and shuts the engine down.
 | `net.resolve` | `host` (domain; an IP literal is echoed back) | `{host, answers:[{ip, sources:[...]}]}`; DoH, Iranian UDP resolvers and system DNS, so disagreeing answers reveal tampering. Blocking (several seconds): requests run concurrently, so other calls are not held up |
 | `net.geo` | `ip` (IPv4/IPv6/domain; empty = this machine's public IP) | `{query, text, ok}`; `ok` is false when every provider failed. The value is validated because it is placed in provider URLs |
 | `ui.settings_get` | – | `{settings}`: the Electron UI's saved form values (flat `{id: string/bool/number}`); unreadable or malformed entries are dropped |
-| `ui.settings_set` | `settings` | `{saved}`; replaces the saved settings (<= 200 keys `[a-z][a-z0-9_-]*`, string values <= 4096, finite numbers). Stored in `~/.xray_forge/ui_settings.json`, owner-only; separate from the Tk GUI's `settings.json` |
+| `ui.settings_set` | `settings` | `{saved}`; replaces the saved settings (<= 200 keys `[a-z][a-z0-9_-]*`, string values <= 4096, finite numbers). Stored in `~/.xray_forge/ui_settings.json`, owner-only; separate from `settings.json` (core paths) |
 | `warp.status` | – | `{registered, device_id (12 chars), endpoint, ipv4, ipv6}`; never returns keys or tokens |
 | `warp.register` | – | status; talks to Cloudflare, saved 0600 |
 | `warp.config` | `endpoint`, `format` (`xray`/`singbox`/`mihomo`) | outbound JSON snippet (contains the WireGuard key: it is the user's own config) |
@@ -61,7 +61,7 @@ cancels everything and shuts the engine down.
 | Param | Default | Meaning |
 |---|---|---|
 | `fp`, `cs`, `fm` | engine defaults (`engine.info.defaults`) | values injected into each link; `fm` must be JSON when `want_fm` is on |
-| `want_fp`, `want_cs`, `want_fm` | `true` | what to inject; all `false` = the Tk GUI's "IP only" mode |
+| `want_fp`, `want_cs`, `want_fm` | `true` | what to inject; all `false` = "IP only" mode |
 | `tls_only` | `true` | when injecting, skip links whose `security` is not `tls` |
 | `rename`, `template`, `start` | `true`, default template, `1` | naming; keys are listed in `engine.info.template_keys`; `start` is 0..99999 |
 | `ip`, `port` | `""` | force one endpoint on every link (IPv4, IPv6 or domain; port 1..65535). Only the connect address changes: sni/host/path are untouched |

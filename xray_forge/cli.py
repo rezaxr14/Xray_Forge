@@ -6,7 +6,7 @@ Entry points:
 * ``python Xray_Forge.py <cmd>`` (root launcher)
 * ``xray-forge <cmd>`` (installed console script)
 
-Subcommands: gui · convert · export · test · scan · geo ·
+Subcommands: gui (points to the desktop app) · convert · export · test · scan · geo ·
              mitm · warp · subs · version
 """
 
@@ -321,7 +321,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="log debug output to stderr (also ~/.xray_forge/logs)")
     sub = parser.add_subparsers(dest="cmd")
 
-    sub.add_parser("gui", help="launch GUI (default)")
+    sub.add_parser("gui", help="(retired) the Tk GUI was replaced by the Electron desktop app")
     sub.add_parser("version", help="print version")
     sub.add_parser("serve", help="run the engine API (JSON-RPC over stdin/stdout)")
 
@@ -427,6 +427,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+_NO_TK_GUI = ("The Tkinter GUI has been retired. Use the Xray Forge desktop app "
+               "(see electron/ in the repository, or the installer from the releases page); "
+               "everything else is available here as subcommands (see --help).")
+
+
 def main(argv: list[str] | None = None) -> int:
     # Windows consoles default to cp1252 and crash on unicode output.
     for stream in (sys.stdout, sys.stderr):
@@ -474,11 +479,11 @@ def main(argv: list[str] | None = None) -> int:
     elif cmd == "subs":
         cli_subs(args.action, args.url, args.name, args.top_n, args.outfile,
                  args.workers, args.timeout, args.no_throughput, args.core)
+    elif cmd == "gui":
+        print(_NO_TK_GUI, file=sys.stderr)
+        return 2
     else:
-        # default: launch GUI (imported lazily so the CLI stays headless)
-        from xray_forge.app import App
-        app = App()
-        app.mainloop()
+        parser.print_help()
         return 0
     return 0
 

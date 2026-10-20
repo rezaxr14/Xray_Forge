@@ -9,7 +9,8 @@ Xray Forge is a Python utility for managing, fixing, testing and exporting
 proxy configurations (VLESS / VMess / Trojan / Shadowsocks / Hysteria2 /
 TUIC / WireGuard-WARP) with DPI-resistance features: fragmented TLS probes,
 fake SNI, domain fronting, and a local MITM-DomainFronting config generator.
-It ships a Tkinter GUI and a fully headless CLI.
+It ships an Electron desktop app (UI over the Python engine, JSON-RPC on stdio;
+see `docs/engine-api.md`) and a fully headless CLI. The Tkinter GUI is retired.
 
 License: **CC BY 4.0**. Do not paste GPL-licensed code into this repo
 (see *Licensing constraints* below).
@@ -26,14 +27,13 @@ ruff check --select E9,F63,F7,F82 .
 # compile check
 python -m compileall -q xray_forge Xray_Forge.py
 
-# CLI (headless — never imports tkinter)
+# CLI (headless)
 python -m xray_forge --help
 python -m xray_forge convert in.txt out.txt
 python -m xray_forge export in.txt out.yaml --format clash
 
-# GUI (needs a display; use xvfb-run -a on Linux)
-python -m xray_forge gui
-python -c "from xray_forge.app import App; a=App(); a.update(); a.destroy()"
+# desktop app tests (Node 22+; Playwright for the end-to-end tests)
+cd electron && npm test
 ```
 
 CI (`.github/workflows/ci.yml`) runs on ubuntu-latest and windows-latest ×
@@ -47,8 +47,8 @@ CLI and GUI smoke tests.
 ```
 Xray_Forge.py            root launcher -> xray_forge.cli:main
 xray_forge/
-  cli.py                 headless CLI (argparse subcommands). No tkinter here.
-  app.py                 Tkinter GUI (App class). Imports tkinter freely.
+  cli.py                 headless CLI (argparse subcommands)
+  engine/                JSON-RPC engine API for the Electron app (methods, jobs, rpc)
   core/
     models.py            Outbound dataclass — THE config representation
     config.py            constants (fingerprints, ranges, ports, presets)
@@ -73,10 +73,9 @@ xray_forge/
                          scoring, ranking, best-N subscription export
     domainfront.py       MITM-DomainFronting Xray config generator + CA tools
     warp.py              pure-python X25519, WARP account API, endpoint scan
-    settings.py          GUI settings.json + data_dir() (~/.xray_forge)
+    settings.py          settings.json (core paths) + data_dir() (~/.xray_forge)
     dedup.py             config de-duplication
-    prober_utils.py      small formatting helpers
-  ui/                    Tkinter widgets + tabs (never imported by cli.py)
+electron/                desktop app (main/preload/files.js, renderer/, test/)
 tests/                   pytest suite (offline; see Testing rules)
 .github/workflows/       ci.yml, release.yml (PyInstaller builds + checksums)
 ```
@@ -86,10 +85,9 @@ tests/                   pytest suite (offline; see Testing rules)
 1. **`from __future__ import annotations` at the top of every module**
    that defines functions/classes (right after the module docstring).
    Runtime PEP-604 unions (`str | None`) otherwise break older interpreters.
-2. **CLI stays headless.** `xray_forge/cli.py` must never import `tkinter`,
-   directly or transitively. The GUI default in `main()` imports
-   `xray_forge.app` lazily. Entry points (`Xray_Forge.py`, `__main__.py`)
-   import from `xray_forge.cli`.
+2. **CLI and engine stay headless.** `xray_forge/cli.py` and `xray_forge/engine/`
+   must never import `tkinter` or any UI toolkit. Entry points (`Xray_Forge.py`,
+   `__main__.py`) import from `xray_forge.cli`.
 3. **`parse_target` returns an `Outbound`** (`core/models.py`), never a dict.
    `Outbound` implements `__getitem__`/`get` with the legacy keys
    (`uuid`, `hdr`, `type`, `fp`) for backwards compatibility — do not add new
@@ -125,8 +123,7 @@ tests/                   pytest suite (offline; see Testing rules)
 - X25519 implementation is verified against RFC 7748 test vectors — if you
   touch `core/warp.py::x25519`, those tests must still pass exactly.
 - Run the full suite before committing: `python -m pytest tests -q`.
-- The GUI must still boot: run the `App()` smoke one-liner above after
-  touching `app.py` or `ui/`.
+- After touching `electron/`, run `cd electron && npm test`.
 
 ## Licensing constraints (important)
 

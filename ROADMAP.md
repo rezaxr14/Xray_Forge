@@ -75,7 +75,7 @@ See `docs/engine-api.md`.
   `docs/packaging.md`. **Not yet run**: the first `workflow_dispatch`/tag
   build is the real test; unsigned installers; no lock file yet.
 - ✅ Cores tab: detect xray/sing-box/mihomo (saved path, env, v2rayN, ./bin, PATH), set/clear path; `health.run` explains a missing core.
-- 🟡 Step 5: reach parity with the Tk GUI, then retire it (`app.py`, `ui/`,
+- ✅ Step 5: reach parity with the Tk GUI, then retire it (`app.py`, `ui/`,
   GUI tests, CI steps). In order:
   - ✅ 5.1 Converter rules UI: mode (full / IP only / custom), fp/cs/fm
     switches and values, only-TLS, rename + template + start #, FORCE IP /
@@ -123,7 +123,20 @@ See `docs/engine-api.md`.
     the three `ipcMain.handle` lines in `main.js` and the real native dialog
     windows are **not** exercised (no Electron binary here). Also fixed a 1-in-70
     flaky scan test of mine (re-sampling the same /29 could leave no fresh IPs).
-  - ⬜ 5.6 Retire the Tk GUI once parity holds.
+  - ✅ 5.6 Retire the Tk GUI. Parity audit first (5.6a): added fragment spec on
+    scan/SNI (validated by the engine), range presets, JSON export, result
+    clearing, Retest selected / Copy link. Then removed `app.py`, `ui/`,
+    `tests/test_gui.py`, the screenshots, the dead `core/prober_utils.py`, and the
+    Tk/xvfb/GUI steps in CI. `python -m xray_forge gui` now exits 2 with a pointer
+    to the desktop app; no subcommand prints help (it used to open a window).
+    Also fixed: `python -m xray_forge` dropped main()'s exit code (always 0).
+    **Deliberately not ported** (Tk-only manual knobs of the legacy tester, which
+    the staged health pipeline supersedes by trying fragment variants itself):
+    free-form fragment string, fake SNI, domain-front header, TLS record
+    fragmentation / ClientHello padding toggles, the xray-only "via core" test with
+    its fragment switch, and the ★ best marker (health is sorted by score). The
+    library code behind them (`core/probe.py`) is still there if they are wanted
+    as `health.run` options.
 
 ---
 

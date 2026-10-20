@@ -5,11 +5,11 @@ Xray Forge — VLESS / Trojan / VMess / Shadowsocks / Hysteria2 / TUIC / WARP
 config utility.
 
 This is the repo-root entry point.  The real code lives in the
-``xray_forge/`` package (core/, ui/, ui/tabs/); this thin launcher just boots
-the headless CLI (use ``gui`` for the Tkinter app).
+``xray_forge/`` package (core/, engine/); this thin launcher just boots the
+CLI (the desktop UI is the Electron app in electron/).
 
 Run:
-    python Xray_Forge.py                     # GUI
+    python Xray_Forge.py --help
     python Xray_Forge.py convert in.txt out.txt
     python Xray_Forge.py test in.txt --core /path/to/xray.exe
     python Xray_Forge.py scan 104.16.0.0/13 --sni example.com --csv out.csv

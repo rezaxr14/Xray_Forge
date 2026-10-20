@@ -32,6 +32,17 @@ def test_parser_subcommands():
         assert args.cmd == cmd
 
 
+def test_gui_subcommand_points_to_the_desktop_app(capsys):
+    assert main(["gui"]) == 2
+    assert "retired" in capsys.readouterr().err
+
+
+def test_no_subcommand_prints_help_instead_of_launching_a_window(capsys):
+    assert main([]) == 0
+    out = capsys.readouterr().out
+    assert "usage:" in out and "convert" in out
+
+
 def test_convert_end_to_end(tmp_path, capsys):
     infile = tmp_path / "in.txt"
     outfile = tmp_path / "out.txt"
@@ -104,3 +115,14 @@ def test_subs_list_empty(tmp_path, capsys):
 def test_warp_config_without_account_exits(tmp_path):
     with pytest.raises(SystemExit):
         main(["warp", "config"])
+
+
+def test_python_m_xray_forge_propagates_the_exit_code():
+    """`python -m xray_forge` used to drop main()'s return value (always exit 0)."""
+    import subprocess
+    import sys
+    r = subprocess.run([sys.executable, "-m", "xray_forge", "gui"],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 2 and "retired" in r.stderr
+    assert subprocess.run([sys.executable, "-m", "xray_forge", "version"],
+                          capture_output=True, text=True, timeout=60).returncode == 0

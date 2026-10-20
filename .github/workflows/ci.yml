@@ -37,12 +37,6 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
-      - name: Install Tk and Xvfb (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends python3-tk xvfb
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -67,14 +61,6 @@ jobs:
           name: coverage-ubuntu-py312
           path: coverage.xml
 
-      - name: GUI interaction tests
-        run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            xvfb-run -a python -m pytest tests/test_gui.py -v
-          else
-            python -m pytest tests/test_gui.py -v
-          fi
-
       - name: CLI smoke test
         run: |
           python -m xray_forge --help
@@ -85,17 +71,6 @@ jobs:
           python -m xray_forge export "$RUNNER_TEMP/out.txt" "$RUNNER_TEMP/clash.yaml" --format clash
           python -m xray_forge export "$RUNNER_TEMP/out.txt" "$RUNNER_TEMP/sb.json" --format singbox
           test -s "$RUNNER_TEMP/clash.yaml" && test -s "$RUNNER_TEMP/sb.json"
-
-      - name: GUI smoke test (launch and destroy)
-        # `python -c` (not a script in $RUNNER_TEMP): a script puts *its own*
-        # directory on sys.path, so the repo root was not importable.
-        run: |
-          SMOKE="from xray_forge.app import App; a = App(); a.update(); a.destroy(); print('GUI smoke test passed')"
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            xvfb-run -a python -c "$SMOKE"
-          else
-            python -c "$SMOKE"
-          fi
 
   ui:
     name: Electron UI (e2e)

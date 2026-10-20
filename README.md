@@ -12,7 +12,8 @@ A full-featured, modular Python utility for managing, fixing, testing, and expor
 
 ```
 Xray_Forge/
-├── Xray_Forge.py             # root launcher (CLI + GUI) → xray_forge.cli:main
+├── Xray_Forge.py             # root launcher (CLI) → xray_forge.cli:main
+├── electron/                 # desktop app (Electron UI over the engine, JSON-RPC on stdio)
 ├── AGENTS.md                 # instructions for AI agents / contributors
 ├── ROADMAP.md                # phased plan + status
 ├── pyproject.toml            # pip-installable package config (py ≥ 3.10)
@@ -20,8 +21,8 @@ Xray_Forge/
 ├── .github/workflows/        # ci.yml (test matrix) · release.yml (exe builds)
 └── xray_forge/               # Modular Python package
     ├── __main__.py           # Entry point: `python -m xray_forge`
-    ├── cli.py                # Headless CLI (subcommands; never imports tkinter)
-    ├── app.py                # Tkinter GUI (App class)
+    ├── cli.py                # Headless CLI (subcommands)
+    ├── engine/               # JSON-RPC engine API used by the desktop app (`serve`)
     ├── core/
     │   ├── models.py         # Outbound dataclass — the config representation
     │   ├── config.py         # Constants, fingerprints, ranges, presets
@@ -41,11 +42,7 @@ Xray_Forge/
     │   ├── domainfront.py    # MITM-DomainFronting config generator + CA tools
     │   ├── warp.py           # WARP accounts, X25519, endpoint scanning
     │   ├── settings.py       # Settings + per-user data dir (~/.xray_forge)
-    │   ├── dedup.py          # Config deduplication
-    │   └── prober_utils.py   # Shared formatting helpers
-    └── ui/
-        ├── widgets.py        # Tooltip, animated Switch toggle
-        └── tabs/             # converter / tester / xray-core / ip-finder tabs
+    │   └── dedup.py          # Config deduplication
 ```
 
 ---
@@ -56,11 +53,11 @@ Xray_Forge/
 # Clone or extract, then:
 pip install -r requirements.txt
 
-# Run the GUI
-python -m xray_forge gui
-
-# Or use the CLI
+# Use the CLI
 python -m xray_forge --help
+
+# Desktop app (Electron; needs Node 22+)
+cd electron && npm install && npm start
 ```
 
 Install as a package (adds the `xray-forge` command):
@@ -78,124 +75,21 @@ pip install ".[mitm]"     # cryptography, for MITM-DomainFronting CA generation
 
 ---
 
-## 🖥️ GUI Tabs
+## 🖥️ Desktop app
+
+The UI is an Electron app (`electron/`) that talks to the Python engine
+(`python -m xray_forge serve`, see `docs/engine-api.md`); release builds bundle
+the engine. The old Tkinter GUI has been retired.
 
 | Tab | Purpose |
 |-----|---------|
-| **⚙ Configs** | Paste raw configs → live-convert with fingerprint/cipher/fragment injection, renaming, and mass IP/port override |
-| **✎ Editor** | Per-config field editor (Reality pbk/sid/spx, XHTTP mode, flow) + raw-JSON round-trip |
-| **📡 Tester** | Fragmented TLS + WebSocket 101 + REAL delay through tunnel + exit-country detection |
-| **🧩 Xray Core** | Auto-detect/verify `xray.exe` (v2rayN, PATH, etc.) and test configs through the real engine via local SOCKS |
-| **🌐 IP Finder** | Geo lookup, anti-hijack DNS resolution (DoH + Iranian UDP + system), resumable CIDR scan sessions with CSV/JSON export |
-| **🎯 SNI Search** | Probe candidate SNIs (fronting hosts) against clean IPs — find the (ip, sni) pairs your network lets through |
-| **📥 Subscriptions** | Source manager (ETag cache) + staged health checks with scoring, technique tags, best-N subscription export |
-
-## 📸 Screenshots
-
-| Converter (fix · rename · mass override) | Tester (fragmented TLS · ws 101 · exit country) |
-|---|---|
-| ![Converter](screenshots/01_converter.png) | ![Tester](screenshots/02_tester.png) |
-| Xray Core (real engine via local SOCKS) | IP Finder (geo · DNS resolve · CIDR scan) |
-| ![Xray Core](screenshots/03_xray_core.png) | ![IP Finder](screenshots/04_ip_finder.png) |
-
----
-
-## 🔧 CLI Usage
-
-The CLI is fully **headless** (no Tk required) and uses subcommands:
-
-```bash
-# Convert & fix configs (fingerprint + ciphers + fragment injection)
-python -m xray_forge convert in.txt out.txt --fp chrome --ip 1.2.3.4 --port 443
-
-# IP-only mode (no injection)
-python -m xray_forge convert in.txt out.txt --ip-only
-
-# Export
-python -m xray_forge export in.txt clash.yaml   --format clash     # Clash Meta (Mihomo)
-python -m xray_forge export in.txt singbox.json --format singbox   # Sing-box
-python -m xray_forge export in.txt sub.txt      --format sub       # base64 subscription
-
-# Test configs (native probes, or through a real xray binary)
-python -m xray_forge test in.txt --frag 5,94,1@2
-python -m xray_forge test in.txt --core /path/to/xray
-
-# Resumable CIDR scan with jitter, CSV/JSON export and geo tagging
-python -m xray_forge scan 104.16.0.0/13 --sni example.com --count 200 --geo \
-       --csv scan.csv --json scan.json
-python -m xray_forge scan 104.16.0.0/13 --resume scan_20250101_120000
-
-# SNI / fronting-host search: candidate SNIs x clean IPs (from a scan session)
-python -m xray_forge snisearch --from-scan scan_20250101_120000 \
-       --presets --workers 32 --csv sni.csv --json sni.json
-
-# Geo-lookup an IP
-python -m xray_forge geo 1.1.1.1
-
-# MITM-DomainFronting: generate the Xray config (+ optional personal CA + guide)
-python -m xray_forge mitm -o MITM-DomainFronting.json --gen-cert --guide
-
-# WARP: register a device, emit WireGuard outbounds, scan endpoints
-python -m xray_forge warp register
-python -m xray_forge warp config
-python -m xray_forge warp scan-endpoints --count 100
-
-# Subscription pipeline: manage sources, fetch, then health-check locally
-python -m xray_forge subs add --url https://example.com/sub --name mylist
-python -m xray_forge subs fetch
-python -m xray_forge subs check --top 10 --out best.txt
-python -m xray_forge subs check --core auto   # non-VLESS configs via a real core
-```
-
-### Subcommand options
-
-| Command | Notable options |
-|---------|-----------------|
-| `convert` | `--fp --cs --fm --ip --port --template --start --no-rename --ip-only --no-fp --no-cs --no-fm --all-security --dedup` |
-| `export` | `--format clash\|singbox\|sub` |
-| `test` | `--timeout --frag --core` |
-| `scan` | `--count --sni --port --workers --frag --resume NAME --csv FILE --json FILE --geo` |
-| `snisearch` | `--ips --snis --presets --from-scan NAME --port --workers --frag --timeout --no-http --resume NAME --csv FILE --json FILE` |
-| `geo` | `IP` (empty = your own IP) |
-| `mitm` | `-o FILE --cn --gen-cert --groups google,meta,fastly --guide` |
-| `warp` | `register\|config\|scan-endpoints` · `--endpoint --count --workers` |
-| `subs` | `add\|list\|remove\|fetch\|check` · `--url --name --top --out --workers --timeout --no-throughput --core auto\|xray\|singbox\|mihomo` |
-
----
-
-## ✨ Key Features
-
-### 1. Config Conversion & Fixing
-- **Three modes:** Full fix (fp + cs + fm), IP-only, Custom
-- **Expanded uTLS fingerprints:** chrome, firefox, safari, edge, ios, android, opera, brave, vivaldi, qq, sogou, random, randomized, **unsafe**
-- **Cipher suite injection** (`cs=`) with customizable lists
-- **Fragment mask injection** (`fm=`) for DPI-resistant ClientHello
-- **Smart naming engine** with template keys: `{id}`, `{sub}`, `{path}`, `{ip}`, `{port}`, `{host}`, `{net}`, `{sni}`, `{proto}`, `{old}`
-- **Mass endpoint override** — force one IP:port on every config
-- **Live auto-convert** as you type/paste
-
-### 2. Protocols & Cores (registry-based)
-- **Protocols:** VLESS (incl. **Reality** `pbk`/`sid`/`spx`, `flow`), VMess (base64 + plain), Trojan, Shadowsocks (SIP002 + legacy), Hysteria2, TUIC, WireGuard/WARP
-- **Transports:** ws, grpc, httpupgrade, tcp, **xhttp**
-- **Cores:** Xray-core, sing-box, Mihomo adapters build complete client configs; each reports exactly which protocols it can run (derived from the protocol renderers, so the UI/CLI only offer what the chosen core can execute)
-- Share-link round-trips for every registered protocol (incl. Clash YAML ↔ URI and sing-box JSON ↔ URI)
-
-### 3. DPI-Resistant Testing (heavy censorship)
-- Fragmented ClientHello (same as `fm=` mask) — `5,94,1@2` / random presets
-- **Fake / decoy Client Hello** with benign SNI (MMDF "instant certificate" style)
-- **TLS record-layer fragmentation** — split SNI extension across records
-- **Domain fronting** — connect to a front domain, request the real host inside the tunnel
-- SNI case mixing, TLS padding, noise packets, TCP Fast Open, User-Agent rotation
-- TCP ping + TLS handshake + WebSocket 101 upgrade
-- REAL delay measurement through the tunnel
-- Exit-country detection via geo APIs tunneled through the proxy
-- Edge-IP country fallback (marked `*`)
-
-### 4. MITM-DomainFronting (no VPS needed)
-- `xray_forge mitm` generates an Xray-core ≥ 26.2.6 config implementing the documented technique: local TLS-terminating `tunnel` inbounds signed by a **personal** CA (`"usage": "issue"`), then re-packing requests to Google/Meta/Fastly services with a benign cover SNI (`fromMitM` verification)
-- Optional per-user CA generation (`cryptography`) or the equivalent openssl command
-- Built-in Windows / Android / Firefox setup guides (`--guide`)
-- ⚠️ Never share your `mycert.key`, never use someone else's certificate
+| **Configs** | Paste or open links → table with the editor (Reality, XHTTP, headers, raw JSON round-trip), dedup, export to Clash / sing-box / subscription |
+| **Convert** | Live rules: fingerprint / cipher / fragment injection, renaming templates, forced IP / port, duplicate removal |
+| **Health** | Staged checks with scoring, technique tags, `[CC]` exit-country tags, retest selected rows |
+| **Subscriptions** | Source manager, check all sources, best-N export, tagged lines |
+| **IP scanner** | Geo / DNS lookup, resumable CIDR scans (range presets, fragment spec), CSV/JSON export |
+| **SNI search** | (ip, sni) pairs your network lets through |
+| **WARP · MITM · Cores** | WARP device and config, MITM-DomainFronting generator, proxy-core detection |
 
 ### 5. Real Core Bridge (probe through actual engines)
 - Auto-detects `xray` from v2rayN, PATH, env `XRAY_CORE`
@@ -208,7 +102,7 @@ python -m xray_forge subs check --core auto   # non-VLESS configs via a real cor
 - **Scan sessions** persist to `~/.xray_forge/scans/` — stop and resume later, even from a new process
 - CSV/JSON export and per-ISP grouping for comparing scans over time
 - Anti-hijack DNS: DoH (1.1.1.1, 8.8.8.8, shecan, 403) + Iranian UDP resolvers + system DNS
-- One-click "use as FORCE IP" from scan results (GUI)
+- One-click "use as FORCE IP" from scan results (desktop app)
 
 ### 7. Subscription Pipeline (test on YOUR network)
 - **Source manager:** any number of subscription URLs with ETag-based caching, auto-detection of base64 / plain text / **Clash YAML** / **sing-box JSON**, and de-duplication across sources
@@ -227,7 +121,7 @@ python -m xray_forge subs check --core auto   # non-VLESS configs via a real cor
 - **Base64 subscription** — standard `sub://` compatible link
 
 ### 10. Deduplication · Filtering · Best-Config Marking · Settings Persistence
-- Duplicate removal (scheme + credential + host + port), text filter, "★ mark best", full GUI state persistence
+- Duplicate removal (scheme + credential + host + port); the desktop app remembers its form values between runs
 
 ---
 

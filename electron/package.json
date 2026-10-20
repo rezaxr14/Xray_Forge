@@ -26,6 +26,7 @@
       "preload.js",
       "engine-client.js",
       "engine-path.js",
+      "files.js",
       "renderer/**/*",
       "package.json"
     ],

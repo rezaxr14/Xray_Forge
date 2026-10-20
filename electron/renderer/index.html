@@ -22,6 +22,7 @@
       <button role="tab" data-tab="mitm" aria-selected="false">MITM fronting</button>
       <button role="tab" data-tab="cores" aria-selected="false">Cores</button>
     </nav>
+    <span id="settings-msg" class="bad-text small" role="status"></span>
     <span id="engine-status" class="muted" aria-live="polite">engine: connecting…</span>
   </header>
 
@@ -34,6 +35,7 @@
         <div class="col">
           <button id="cfg-parse" class="primary">Parse</button>
           <button id="cfg-dedup">Remove duplicates</button>
+          <button id="cfg-open">Open file…</button>
           <button id="cfg-clear">Clear</button>
           <span id="cfg-count" class="muted">0 configs</span>
         </div>
@@ -74,12 +76,15 @@
           </select>
         </label>
         <button id="export-run">Export</button>
+        <button id="export-save">Save…</button>
+        <span id="export-msg" class="muted" role="status"></span>
       </div>
       <textarea id="export-out" rows="6" readonly spellcheck="false" placeholder="Export output appears here"></textarea>
     </section>
 
     <!-- Convert -->
     <section id="tab-convert" class="tab" role="tabpanel" hidden>
+      <div class="row"><button id="cv-open">Open file…</button></div>
       <textarea id="cv-input" rows="8" spellcheck="false" placeholder="Paste links to fix (fingerprint, fragment, naming)"></textarea>
 
       <fieldset class="rules" id="cv-rules">
@@ -143,6 +148,7 @@
           <textarea id="cv-output" rows="8" readonly spellcheck="false"></textarea>
           <div class="row">
             <button id="cv-copy">Copy output</button>
+            <button id="cv-save">Save output…</button>
             <button id="cv-send">Send to Configs</button>
           </div>
         </div>
@@ -220,6 +226,7 @@
           <button id="sk-export" disabled>Export best N (base64)</button>
           <button id="sk-tagged" disabled>Show tagged lines</button>
           <button id="sk-load" disabled>Best N → Configs</button>
+          <button id="sk-save">Save export…</button>
         </div>
         <div class="table-wrap short">
           <table id="sk-table">
@@ -278,6 +285,7 @@
         <button id="sc-load">Load</button>
         <button id="sc-resume">Resume</button>
         <button id="sc-export">Export CSV</button>
+        <button id="sc-save">Save CSV…</button>
         <button id="sc-to-sni">Alive IPs → SNI search</button>
       </div>
       <div class="row"><progress id="sc-progress" value="0" max="1"></progress><span id="sc-status" class="muted" role="status">idle</span></div>
@@ -310,6 +318,7 @@
         <button id="sn-start" class="primary">Search</button>
         <button id="sn-cancel" disabled>Cancel</button>
         <button id="sn-export">Export CSV</button>
+        <button id="sn-save">Save CSV…</button>
       </div>
       <div class="row"><progress id="sn-progress" value="0" max="1"></progress><span id="sn-status" class="muted" role="status">idle</span></div>
       <div class="table-wrap">

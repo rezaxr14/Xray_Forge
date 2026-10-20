@@ -1,8 +1,9 @@
 'use strict';
 const path = require('node:path');
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const { EngineClient } = require('./engine-client');
 const { resolveEngine } = require('./engine-path');
+const { makeFileApi } = require('./files');
 
 const repoRoot = path.resolve(__dirname, '..');
 // Packaged: the PyInstaller engine bundle in <resources>/engine; dev: python -m xray_forge.
@@ -38,6 +39,11 @@ app.whenReady().then(() => {
     if (typeof method !== 'string') throw new Error('method must be a string');
     return engine.call(method, params && typeof params === 'object' ? params : {});
   });
+  const files = makeFileApi({ dialog, getWindow: () => win });
+  const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+  ipcMain.handle('forge:openText', (_e, o) => files.openText(obj(o)));
+  ipcMain.handle('forge:saveText', (_e, o) => files.saveText(obj(o)));
+  ipcMain.handle('forge:pickPath', (_e, o) => files.pickPath(obj(o)));
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });

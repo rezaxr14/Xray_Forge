@@ -890,6 +890,39 @@ $('#mt-ca').addEventListener('click', () => guarded($('#mt-msg'), async () => {
   say($('#mt-msg'), r.note);
 }));
 
+// ------------------------------------------------------- native file dialogs
+// Opening and saving go through the main process (files.js): the renderer only
+// names a kind of file and gets back text or the path the user picked.
+async function openTextInto(textarea, msgEl, title) {
+  if (!window.forge.openText) { say(msgEl, 'opening files needs the desktop app', true); return null; }
+  const r = await window.forge.openText({ kind: 'text', title });
+  if (!r) { say(msgEl, 'open cancelled'); return null; }
+  textarea.value = r.text;
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  say(msgEl, `loaded ${r.path}`);
+  return r;
+}
+async function saveTextAs(text, name, kind, msgEl) {
+  if (!text || !text.trim()) { say(msgEl, 'nothing to save'); return; }
+  if (!window.forge.saveText) { say(msgEl, 'saving files needs the desktop app', true); return; }
+  const p = await window.forge.saveText({ text, defaultName: name, kind });
+  say(msgEl, p ? `saved ${p}` : 'save cancelled');
+}
+const EXPORT_FILES = { clash: ['config.yaml', 'yaml'], singbox: ['config.json', 'json'], sub: ['subscription.txt', 'text'] };
+
+$('#cfg-open').addEventListener('click', () => guarded($('#cfg-count'), async () => {
+  if (await openTextInto($('#cfg-input'), $('#cfg-count'), 'Open links')) await parseInput();
+}));
+$('#cv-open').addEventListener('click', () => guarded($('#cv-msg'), () => openTextInto($('#cv-input'), $('#cv-msg'), 'Open links')));
+$('#cv-save').addEventListener('click', () => guarded($('#cv-msg'), () => saveTextAs($('#cv-output').value, 'vless_fixed.txt', 'text', $('#cv-msg'))));
+$('#export-save').addEventListener('click', () => guarded($('#export-msg'), () => {
+  const [name, kind] = EXPORT_FILES[$('#export-format').value] || ['export.txt', 'text'];
+  return saveTextAs($('#export-out').value, name, kind, $('#export-msg'));
+}));
+$('#sk-save').addEventListener('click', () => guarded($('#sk-status'), () => saveTextAs($('#sk-out').value, 'best_sub.txt', 'text', $('#sk-status'))));
+$('#sc-save').addEventListener('click', () => guarded($('#sc-status'), () => saveTextAs($('#sc-out').value, `${$('#sc-sessions').value || 'scan'}.csv`, 'csv', $('#sc-status'))));
+$('#sn-save').addEventListener('click', () => guarded($('#sn-status'), () => saveTextAs($('#sn-out').value, `${sn.session || 'sni_search'}.csv`, 'csv', $('#sn-status'))));
+
 // ------------------------------------------------------------------ boot
 (async () => {
   try {
@@ -899,10 +932,73 @@ $('#mt-ca').addEventListener('click', () => guarded($('#mt-msg'), async () => {
     cvResetRules();
     $('#cv-keys').textContent = (state.info.template_keys || []).map((k) => `{${k}}`).join(' ');
     for (const c of state.info.cores) { $('#hc-core').append(h('option', { value: c }, c)); $('#sk-core').append(h('option', { value: c }, c)); }
+    await loadSettings();
   } catch (e) {
     $('#engine-status').textContent = `engine unavailable: ${e.message}`;
   }
 })();
+
+// ------------------------------------------------------ settings persistence
+// Form controls worth remembering between runs. Pasted links and results are
+// deliberately not here (they can hold credentials); the order matters: the
+// convert mode is applied first because changing it adjusts the switches.
+const PERSIST = [
+  'cv-mode', 'cv-want-fp', 'cv-want-cs', 'cv-want-fm', 'cv-tls-only', 'cv-rename', 'cv-dedup',
+  'cv-fp', 'cv-cs', 'cv-fm', 'cv-template', 'cv-start', 'cv-ip-on', 'cv-ip', 'cv-port-on', 'cv-port',
+  'export-format', 'hc-workers', 'hc-timeout', 'hc-core', 'hc-throughput',
+  'sk-workers', 'sk-timeout', 'sk-core', 'sk-throughput', 'sk-n',
+  'sc-cidrs', 'sc-count', 'sc-port', 'sc-sni', 'sc-workers', 'sc-geo', 'sc-dead',
+  'sn-snis', 'sn-presets', 'sn-http', 'sn-port', 'sn-workers',
+  'wp-count', 'wp-format', 'mt-use-ca', 'mt-platform', 'mt-cn', 'mt-permitted',
+];
+// `ready` is false until the saved values are restored, so the events fired while
+// restoring never trigger a save of a half-restored form.
+const settingsState = { timer: null, ready: false };
+
+function settingValue(el) {
+  return el.type === 'checkbox' ? el.checked : el.value;
+}
+
+function collectSettings() {
+  const out = {};
+  for (const id of PERSIST) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const v = settingValue(el);
+    if (typeof v === 'string' && v.length > 4000) continue;   // the engine caps values at 4096
+    out[id] = v;
+  }
+  return out;
+}
+
+async function loadSettings() {
+  let saved = {};
+  try { saved = (await window.forge.call('ui.settings_get', {})).settings || {}; } catch { return; }
+  try {
+    for (const id of PERSIST) {
+      const el = document.getElementById(id);
+      if (!el || !(id in saved)) continue;
+      const v = saved[id];
+      if (el.type === 'checkbox') el.checked = v === true;
+      else if (el.tagName === 'SELECT') { if ([...el.options].some((o) => o.value === String(v))) el.value = String(v); else continue; }
+      else el.value = String(v);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  } finally { settingsState.ready = true; }
+}
+
+function saveSettingsSoon() {
+  if (!settingsState.ready) return;
+  clearTimeout(settingsState.timer);
+  settingsState.timer = setTimeout(() => guarded($('#settings-msg'), async () => {
+    await window.forge.call('ui.settings_set', { settings: collectSettings() });
+    say($('#settings-msg'), '');
+  }).then(() => {}), 400);
+}
+for (const ev of ['input', 'change']) {
+  document.addEventListener(ev, (e) => { if (e.target && PERSIST.includes(e.target.id)) saveSettingsSoon(); });
+}
 
 // ------------------------------------------------------------------ Cores
 function renderCores(rows) {
@@ -921,7 +1017,11 @@ function renderCores(rows) {
     body.append(h('tr', { 'data-row': r.name },
       h('td', {}, r.display_name), h('td', {}, r.found ? (r.ok ? 'yes' : 'found, no version') : 'no'),
       h('td', {}, r.version), h('td', {}, r.source || ''), h('td', {}, input),
-      h('td', {}, h('button', { 'data-act': 'set', onclick: () => apply(input.value.trim()) }, 'Set'),
+      h('td', {}, h('button', { 'data-act': 'browse', onclick: () => guarded($('#co-msg'), async () => {
+        if (!window.forge.pickPath) { say($('#co-msg'), 'browsing needs the desktop app', true); return; }
+        const p = await window.forge.pickPath({ title: `Select ${r.display_name}` });
+        if (p) { input.value = p; say($('#co-msg'), 'press Set to use it'); }
+      }) }, 'Browse…'), h('button', { 'data-act': 'set', onclick: () => apply(input.value.trim()) }, 'Set'),
         h('button', { 'data-act': 'clear', onclick: () => apply('') }, 'Clear'))));
   }
 }

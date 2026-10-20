@@ -111,7 +111,18 @@ See `docs/engine-api.md`.
     inside the URL query and corrupted links -- they now go into the name
     (VMess: the `ps` field). Tests: Python + 2 e2e (the export/tag UI test stubs
     only those two engine methods, since CI has no reachable working server).
-  - ⬜ 5.5 File open/save dialogs, settings persistence.
+  - ✅ 5.5 File open/save dialogs, settings persistence. Native dialogs run in
+    the Electron main process (`electron/files.js`; the renderer names a file
+    *kind*, never a path or dialog filter; saves are owner-only, opens capped at
+    8 MB): open links (Configs, Convert), save Convert output / export
+    (YAML/JSON/TXT) / best-N subscription / scan and SNI CSV, browse for a core
+    binary. Form values (convert rules, health/check options, scan, SNI, WARP,
+    MITM) persist through `ui.settings_get/set` to `~/.xray_forge/ui_settings.json`
+    (pasted links and results are deliberately not saved). `files.js` is unit
+    tested and exercised end to end through the renderer with a scripted dialog;
+    the three `ipcMain.handle` lines in `main.js` and the real native dialog
+    windows are **not** exercised (no Electron binary here). Also fixed a 1-in-70
+    flaky scan test of mine (re-sampling the same /29 could leave no fresh IPs).
   - ⬜ 5.6 Retire the Tk GUI once parity holds.
 
 ---

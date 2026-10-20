@@ -9,6 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { EngineClient } = require('../engine-client');
+const { makeFileApi } = require('../files');
 
 let playwright = null;
 for (const id of ['playwright', 'playwright-core', '/opt/npm-tools/node_modules/playwright']) {
@@ -34,8 +35,7 @@ function staticServer() {
   });
 }
 
-async function launch() {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'xf-home-'));
+async function launch({ home = fs.mkdtempSync(path.join(os.tmpdir(), 'xf-home-')) } = {}) {
   const engine = new EngineClient({ cwd: repoRoot, env: { HOME: home, USERPROFILE: home } });
   engine.start();
   const srv = await staticServer();
@@ -45,18 +45,28 @@ async function launch() {
   page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
   page.on('console', (m) => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
   await page.exposeFunction('__forgeCall', (m, p) => engine.call(m, p));
+  // Native dialogs: the real files.js with a scripted dialog (tests queue answers).
+  const dialogs = { open: [], save: [], seen: [] };
+  const files = makeFileApi({ dialog: {
+    showOpenDialog: async (o) => { dialogs.seen.push(['open', o]); return dialogs.open.shift() || { canceled: true, filePaths: [] }; },
+    showSaveDialog: async (o) => { dialogs.seen.push(['save', o]); return dialogs.save.shift() || { canceled: true }; },
+  } });
+  await page.exposeFunction('__forgeFile', (m, o) => files[m](o));
   engine.on('job', (ev) => page.evaluate((e) => window.__forgeJob(e), ev).catch(() => {}));
   await page.addInitScript(() => {
     const subs = [];
     window.__forgeJob = (ev) => subs.forEach((f) => f(ev));
     window.forge = {
       call: (m, p) => window.__forgeCall(m, p),
+      openText: (o) => window.__forgeFile('openText', o),
+      saveText: (o) => window.__forgeFile('saveText', o),
+      pickPath: (o) => window.__forgeFile('pickPath', o),
       onJob: (cb) => { subs.push(cb); return () => subs.splice(subs.indexOf(cb), 1); },
     };
   });
   await page.goto(`http://127.0.0.1:${srv.address().port}/`);
   const close = async () => { await browser.close(); srv.close(); await engine.stop(); };
-  return { page, problems, close, engine };
+  return { page, problems, close, engine, dialogs, home };
 }
 
 const opts = { skip: playwright ? false : 'playwright not installed' };
@@ -822,5 +832,174 @@ test('subscriptions: export best N, tagged lines and best N → Configs', opts, 
     await page.click('#sk-load');                      // best N=2 of the 3 tagged lines
     await page.waitForFunction(() => document.querySelectorAll('#cfg-table tbody tr').length === 2);
     assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+// ------------------------------------------------------------ step 5.5
+const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'xf-e2e-'));
+const ready = (page) => page.waitForFunction(() => /engine v\d/.test(document.querySelector('#engine-status').textContent));
+
+test('files: open links into Configs/Convert, cancel is harmless', opts, async () => {
+  const { page, problems, close, dialogs } = await launch();
+  try {
+    await ready(page);
+    const f = path.join(tmpDir(), 'links.txt');
+    fs.writeFileSync(f, `${VLESS}\n${DEAD}\n`);
+    dialogs.open.push({ canceled: true, filePaths: [] });
+    await page.click('#cfg-open');
+    await page.waitForFunction(() => /open cancelled/.test(document.querySelector('#cfg-count').textContent));
+    assert.equal(await page.inputValue('#cfg-input'), '');
+
+    dialogs.open.push({ canceled: false, filePaths: [f] });
+    await page.click('#cfg-open');
+    await page.waitForFunction(() => document.querySelectorAll('#cfg-table tbody tr').length === 2);
+    assert.match(await page.inputValue('#cfg-input'), /first/);
+
+    dialogs.open.push({ canceled: false, filePaths: [f] });
+    await page.click('[data-tab=convert]');
+    await page.click('#cv-open');
+    await page.waitForFunction(() => /loaded .*links\.txt/.test(document.querySelector('#cv-msg').textContent));
+    assert.match(await page.inputValue('#cv-input'), /dead/);
+
+    dialogs.open.push({ canceled: false, filePaths: [path.join(tmpDir())] });   // a directory
+    await page.click('#cv-open');
+    await page.waitForFunction(() => /regular file/.test(document.querySelector('#cv-msg').textContent));
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('files: save output, export, subscription, CSV exports and a core path', opts, async () => {
+  const { page, problems, close, dialogs } = await launch();
+  try {
+    await ready(page);
+    const dir = tmpDir();
+    const target = (n) => { const p = path.join(dir, n); dialogs.save.push({ canceled: false, filePath: p }); return p; };
+
+    await page.click('[data-tab=convert]');
+    await page.click('#cv-save');                                   // nothing to save yet: no dialog
+    assert.match(await page.textContent('#cv-msg'), /nothing to save/);
+    assert.equal(dialogs.seen.length, 0);
+    await page.fill('#cv-input', VLESS);
+    await page.click('#cv-run');
+    await page.waitForFunction(() => /fixed/.test(document.querySelector('#cv-msg').textContent));
+    const out = await page.inputValue('#cv-output');
+    const p1 = target('fixed.txt');
+    await page.click('#cv-save');
+    await page.waitForFunction(() => /^saved /.test(document.querySelector('#cv-msg').textContent));
+    assert.equal(fs.readFileSync(p1, 'utf8'), out);
+    assert.equal(dialogs.seen.at(-1)[1].defaultPath, 'vless_fixed.txt');
+
+    await page.click('[data-tab=configs]');
+    await page.fill('#cfg-input', VLESS);
+    await page.click('#cfg-parse');
+    await page.waitForSelector('#cfg-table tbody tr');
+    await page.selectOption('#export-format', 'clash');
+    await page.click('#export-run');
+    await page.waitForFunction(() => document.querySelector('#export-out').value.length > 0);
+    const p2 = target('c.yaml');
+    await page.click('#export-save');
+    await page.waitForFunction(() => /^saved /.test(document.querySelector('#export-msg').textContent));
+    assert.match(fs.readFileSync(p2, 'utf8'), /proxies/);
+    assert.deepEqual(dialogs.seen.at(-1)[1].defaultPath, 'config.yaml');
+    assert.equal(dialogs.seen.at(-1)[1].filters[0].name, 'YAML');
+
+    await page.click('[data-tab=subs]');
+    await page.evaluate(() => { document.querySelector('#sk-out').value = 'QUJD'; });
+    const p3 = target('sub.txt');
+    await page.click('#sk-save');
+    await page.waitForFunction(() => /^saved /.test(document.querySelector('#sk-status').textContent));
+    assert.equal(fs.readFileSync(p3, 'utf8'), 'QUJD');
+
+    await page.click('[data-tab=scan]');
+    await page.evaluate(() => { document.querySelector('#sc-out').value = 'ip,ms\n1.1.1.1,5'; });
+    const p4 = target('scan.csv');
+    await page.click('#sc-save');
+    await page.waitForFunction(() => /^saved /.test(document.querySelector('#sc-status').textContent));
+    assert.equal(fs.readFileSync(p4, 'utf8'), 'ip,ms\n1.1.1.1,5');
+    dialogs.save.push({ canceled: true });
+    await page.click('#sc-save');
+    await page.waitForFunction(() => /save cancelled/.test(document.querySelector('#sc-status').textContent));
+
+    await page.click('[data-tab=sni]');
+    await page.evaluate(() => { document.querySelector('#sn-out').value = 'ip,sni\n1.1.1.1,a'; });
+    const p5 = target('sni.csv');
+    await page.click('#sn-save');
+    await page.waitForFunction(() => /^saved /.test(document.querySelector('#sn-status').textContent));
+    assert.equal(fs.readFileSync(p5, 'utf8'), 'ip,sni\n1.1.1.1,a');
+
+    await page.click('[data-tab=cores]');
+    await page.waitForSelector('#co-table tbody tr');
+    dialogs.open.push({ canceled: false, filePaths: ['/opt/some/xray'] });
+    await page.click('#co-table tbody tr:first-child [data-act=browse]');
+    await page.waitForFunction(() => /press Set/.test(document.querySelector('#co-msg').textContent));
+    assert.equal(await page.inputValue('#co-table tbody tr:first-child input[data-core]'), '/opt/some/xray');
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('settings: form values survive a restart and re-apply their dependent state', opts, async () => {
+  const first = await launch();
+  const { home } = first;
+  try {
+    await ready(first.page);
+    const pg = first.page;
+    await pg.fill('#cfg-input', VLESS);                     // links are not persisted
+    await pg.click('[data-tab=health]');
+    await pg.selectOption('#hc-core', '');
+    await pg.fill('#hc-workers', '5');
+    await pg.click('[data-tab=convert]');
+    await pg.selectOption('#cv-mode', 'iponly');
+    await pg.fill('#cv-template', '{id}-{host}');
+    await pg.check('#cv-ip-on');
+    await pg.fill('#cv-ip', '9.9.9.9');
+    await pg.uncheck('#cv-dedup');
+    await pg.click('[data-tab=scan]');
+    await pg.check('#sc-dead');
+    await pg.fill('#sc-cidrs', '10.0.0.0/30');
+    // wait until the debounced save reached the engine (poll from Node: a Promise-returning
+    // waitForFunction predicate counts as true at once)
+    for (let i = 0; i < 100; i++) {
+      if ((await first.engine.call('ui.settings_get', {})).settings['sc-cidrs'] === '10.0.0.0/30') break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.equal((await first.engine.call('ui.settings_get', {})).settings['sc-cidrs'], '10.0.0.0/30');
+    assert.equal(await pg.textContent('#settings-msg'), '');
+  } finally { await first.close(); }
+
+  const second = await launch({ home });
+  try {
+    const pg = second.page;
+    await ready(pg);
+    await pg.waitForFunction(() => document.querySelector('#cv-template').value === '{id}-{host}');
+    assert.equal(await pg.inputValue('#hc-workers'), '5');
+    assert.equal(await pg.inputValue('#cv-mode'), 'iponly');
+    assert.equal(await pg.isDisabled('#cv-fp'), true);       // cvSyncMode ran for the restored mode
+    assert.equal(await pg.isChecked('#cv-ip-on'), true);
+    assert.equal(await pg.inputValue('#cv-ip'), '9.9.9.9');
+    assert.equal(await pg.isChecked('#cv-dedup'), false);
+    assert.equal(await pg.isChecked('#sc-dead'), true);
+    assert.equal(await pg.inputValue('#sc-cidrs'), '10.0.0.0/30');
+    assert.equal(await pg.inputValue('#cfg-input'), '');     // never persisted
+    // restoring must not itself trigger a save that clobbers the file with defaults
+    await new Promise((r) => setTimeout(r, 700));
+    const saved = await pg.evaluate(async () => (await window.forge.call('ui.settings_get', {})).settings);
+    assert.equal(saved['cv-template'], '{id}-{host}');
+    assert.equal(saved['cv-ip'], '9.9.9.9');
+    assert.deepEqual(second.problems, []);
+  } finally { await second.close(); }
+});
+
+test('settings: a value the engine refuses is reported, not swallowed', opts, async () => {
+  const { page, close } = await launch();
+  try {
+    await ready(page);
+    await page.waitForFunction(() => settingsState.ready);
+    await page.evaluate(() => {
+      const real = window.forge.call;
+      window.forge.call = (m, p) => (m === 'ui.settings_set' ? Promise.reject(new Error('cannot save settings: disk full')) : real(m, p));
+    });
+    await page.click('[data-tab=health]');
+    await page.fill('#hc-workers', '3');
+    await page.waitForFunction(() => /disk full/.test(document.querySelector('#settings-msg').textContent));
   } finally { await close(); }
 });

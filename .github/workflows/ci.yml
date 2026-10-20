@@ -134,7 +134,7 @@ jobs:
       - name: Syntax check
         working-directory: electron
         run: |
-          for f in main.js preload.js engine-client.js renderer/app.js; do node --check "$f"; done
+          for f in main.js preload.js engine-client.js engine-path.js files.js renderer/app.js; do node --check "$f"; done
 
       - name: End-to-end tests (renderer + real engine)
         working-directory: electron

@@ -139,7 +139,8 @@ def test_tagged_lines_includes_technique(wired, monkeypatch):
                             FakeTLS(), object(), {"tls_ms": 50, "ver": "1.3"}))
     rep = hc.run_health_check(VLESS_TLS_WS)
     tags = hc.tagged_lines([rep])
-    assert tags and "[fragment:" in tags[0]
+    from xray_forge.core.parser import parse_target
+    assert tags and "[fragment:" in parse_target(tags[0]).name
 
 
 def test_stage_result_throughput_bps(wired):
@@ -251,3 +252,59 @@ def test_run_health_checks_progress_and_stop(wired):
                          stop=__import__("threading").Event())
     # stop never set -> everything still reported
     assert stop_seen == [1, 2]
+
+
+def _report(line, score, request_ok):
+    r = hc.HealthReport(line=line, name=line[-6:], scheme="vless", score=score)
+    r.stages.append(hc.StageResult("tls", True, ms=10.0))
+    r.stages.append(hc.StageResult("request", request_ok, ms=20.0))
+    return r
+
+
+def test_best_n_counts_only_working_configs():
+    """A failing config that outscores working ones must not use up a slot
+    (it used to: the top N were taken first and failures dropped afterwards,
+    so best-1 here exported nothing)."""
+    failing_high = _report("vless://a@1.1.1.1:443#aaaaaa", 70.0, request_ok=False)
+    ok_low = _report("vless://b@2.2.2.2:443#bbbbbb", 60.0, request_ok=True)
+    ok_lower = _report("vless://c@3.3.3.3:443#cccccc", 50.0, request_ok=True)
+    reports = [failing_high, ok_lower, ok_low]
+    got = base64.b64decode(hc.export_best_subscription(reports, top_n=1)).decode()
+    assert got == ok_low.line
+    got2 = base64.b64decode(hc.export_best_subscription(reports, top_n=5)).decode().split("\n")
+    assert got2 == [ok_low.line, ok_lower.line]
+    assert hc.export_best_subscription([failing_high], top_n=3) == ""
+
+
+def _tagged_report(line, techniques):
+    r = hc.HealthReport(line=line, name="x", scheme="vless", score=90.0,
+                        techniques=list(techniques))
+    r.stages.append(hc.StageResult("request", True, ms=10.0))
+    return r
+
+
+def test_tagged_lines_tag_the_name_and_leave_the_link_intact():
+    """The tag used to be appended to the URL *query* (path became
+    '/channel [fragment:5,94,1@2]'), corrupting the config."""
+    from xray_forge.core.parser import parse_target
+    before = parse_target(VLESS_TLS_WS)
+    tagged = hc.tagged_lines([_tagged_report(VLESS_TLS_WS, ["fragment:5,94,1@2"])])[0]
+    after = parse_target(tagged)
+    assert after.name == "CF worker [fragment:5,94,1@2]"
+    for field in ("host", "port", "credential", "path", "sni", "host_header",
+                  "transport", "security", "fingerprint"):
+        assert getattr(after, field) == getattr(before, field), field
+    assert " " not in tagged.split("#", 1)[0]          # no stray space inside the URL
+
+
+def test_tagged_lines_vmess_and_ipv6_and_idempotence():
+    from tests.fixtures import VMESS_B64
+    from xray_forge.core.parser import parse_target
+    v6 = "vless://u@[2001:db8::1]:443?security=tls&type=ws&path=%2Fp#six"
+    for line in (VMESS_B64, v6):
+        once = hc.tagged_lines([_tagged_report(line, ["fake-sni"])])[0]
+        out = parse_target(once)
+        assert out is not None and out.name.endswith(" [fake-sni]")
+        assert parse_target(line).path == out.path
+        assert hc.tagged_lines([_tagged_report(once, ["fake-sni"])])[0] == once
+    assert hc.tagged_lines([_tagged_report(VLESS_TLS_WS, [])])[0] == VLESS_TLS_WS

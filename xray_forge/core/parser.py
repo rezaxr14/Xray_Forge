@@ -229,30 +229,27 @@ def fix_uri(line: str, fp: str, cs: str, fm: str, tls_only: bool,
     return new, ("unchanged" if new == line else "fixed"), name
 
 
-def tag_name_with_cc(line: str, cc: str) -> tuple[str, str, bool]:
-    """Append ``[CC]`` (an exit-country code) to a config's name.
+def append_name_suffix(line: str, suffix: str) -> tuple[str, str, bool]:
+    """Append ``suffix`` to a config's *name* (never to the URL).
 
     Returns ``(new_line, name, changed)``.  Idempotent: a name that already
-    ends with ``[CC]`` is left alone, and an invalid country code or an
-    unparsable line returns the line unchanged.  Link schemes keep their
-    query untouched (only the ``#name`` fragment is rewritten); VMess stores
-    its name inside the base64 JSON, so it is re-rendered through its
-    handler.
+    ends with ``suffix`` is left alone, and an unparsable or unsupported line
+    is returned unchanged.  Link schemes keep their query untouched (only the
+    ``#name`` fragment is rewritten); VMess stores its name inside the base64
+    JSON, so it is re-rendered through its handler.
     """
     line = line.strip()
-    code = (cc or "").strip().upper()
-    if len(code) != 2 or not code.isalpha():
+    if not suffix:
         return line, "", False
-    tag = f"[{code}]"
     if line.lower().startswith("vmess://"):
         from xray_forge.core.protocols import handler_for
         out = parse_target(line)
         handler = handler_for("vmess") if out is not None else None
         if out is None or handler is None:
             return line, "", False
-        if out.name.endswith(tag):
+        if out.name.endswith(suffix):
             return line, out.name, False
-        out.name = f"{out.name}{tag}"
+        out.name = f"{out.name}{suffix}"
         return handler.to_uri(out), out.name, True
     try:
         parts = urlsplit(line)
@@ -261,12 +258,21 @@ def tag_name_with_cc(line: str, cc: str) -> tuple[str, str, bool]:
     if parts.scheme.lower() not in PARSE_SCHEMES:
         return line, "", False
     name = unquote(parts.fragment)
-    if name.endswith(tag):
+    if name.endswith(suffix):
         return line, name, False
-    name = f"{name}{tag}"
+    name = f"{name}{suffix}"
     new = urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query,
                       quote(name, safe="")))
     return new, name, True
+
+
+def tag_name_with_cc(line: str, cc: str) -> tuple[str, str, bool]:
+    """Append ``[CC]`` (an exit-country code) to a config's name; see
+    :func:`append_name_suffix`.  An invalid country code changes nothing."""
+    code = (cc or "").strip().upper()
+    if len(code) != 2 or not code.isalpha():
+        return (line or "").strip(), "", False
+    return append_name_suffix(line, f"[{code}]")
 
 
 def convert_block(text: str, fp: str, cs: str, fm: str, tls_only: bool,

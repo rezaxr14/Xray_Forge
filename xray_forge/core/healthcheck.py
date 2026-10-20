@@ -455,24 +455,28 @@ def rank_reports(reports: list[HealthReport], top_n: int = 0) -> list[HealthRepo
 
 
 def export_best_subscription(reports: list[HealthReport], top_n: int = 10) -> str:
-    """Base64 subscription of the best N working configs."""
-    best = [r for r in rank_reports(reports, top_n) if r.passed()]
+    """Base64 subscription of the best N working configs.
+
+    Only configs that passed the request stage compete for the N slots: a
+    failing config with a high partial score must not push a working one out.
+    """
+    best = rank_reports([r for r in reports if r.passed()], top_n)
     raw = "\n".join(r.line for r in best)
     return base64.b64encode(raw.encode("utf-8")).decode("ascii")
 
 
 def tagged_lines(reports: list[HealthReport], min_score: float = 0.0) -> list[str]:
-    """Configs re-tagged with the techniques that worked, e.g.
-    ``name [fragment:5,94,1@2]``."""
+    """Working configs, best first, with the techniques that worked appended
+    to the config *name*, e.g. ``name [fragment:5,94,1@2]``.  Only the name
+    changes; the link itself is left intact."""
+    from xray_forge.core.parser import append_name_suffix
     out: list[str] = []
     for r in rank_reports(reports):
         if r.score < min_score or not r.passed():
             continue
         line = r.line
         if r.techniques:
-            name, _, _frag = line.partition("#")
-            tag = ",".join(r.techniques)
-            if "[" not in name:
-                line = f"{name} [{tag}]#{_frag}" if _frag else f"{name} [{tag}]"
+            line, _name, _changed = append_name_suffix(
+                line, f" [{','.join(r.techniques)}]")
         out.append(line)
     return out

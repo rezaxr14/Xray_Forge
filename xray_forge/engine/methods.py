@@ -4,10 +4,11 @@ business logic lives here so the CLI, the Tk GUI and the new UI stay in sync.
 
 from __future__ import annotations
 
+import base64
 import dataclasses
 import json
 import threading
-from collections import Counter
+from collections import Counter, OrderedDict
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
@@ -32,6 +33,7 @@ from xray_forge.engine.jobs import JobContext, JobManager
 from xray_forge.engine.rpc import Dispatcher, invalid_params
 
 MAX_LINES = 20000
+KEEP_RUNS = 4          # health runs whose reports stay available for export
 MAX_START = 99999
 
 
@@ -167,6 +169,8 @@ def build(emit, sources: SourceManager | None = None
     jobs = JobManager(lambda ev: emit({"jsonrpc": "2.0", "method": "job.event",
                                        "params": ev}))
     state: dict[str, Any] = {"sources": sources}
+    runs: OrderedDict[str, list] = OrderedDict()   # job id -> HealthReports
+    runs_lock = threading.Lock()
 
     def src_mgr() -> SourceManager:
         if state["sources"] is None:
@@ -352,16 +356,12 @@ def build(emit, sources: SourceManager | None = None
                 ctx.item({"url": src.url, "count": len(lines),
                           "status": src.last_status})
                 ctx.progress(i, total)
-            return {"counts": counts}
+            lines, removed = mgr.combined_lines()
+            return {"counts": counts, "total": len(lines), "removed": removed}
         return {"job": jobs.start("sub.fetch", run)}
 
     # -------------------------------------------------------------- health
-    @d.method("health.run")
-    def health_run(lines: list, workers: int = 8, timeout: float = 6.0,
-                   throughput: bool = True, core: str | None = None) -> dict:
-        ls = _lines(lines)
-        if not 1 <= int(workers) <= 64:
-            raise invalid_params("workers must be 1..64")
+    def _core_check(core: str | None) -> None:
         if core is not None and core != "auto" and get_core(core) is None:
             raise invalid_params(f"unknown core: {core}")
         if core:
@@ -372,9 +372,22 @@ def build(emit, sources: SourceManager | None = None
             if core != "auto" and core not in have:
                 raise invalid_params(f"{core} not found; set its path in the Cores tab")
 
+    def _start_health(ls: list[str], workers: Any, timeout: Any,
+                      throughput: bool, core: str | None) -> str:
+        """Validate and start a health-check job over ``ls``; the reports are
+        kept (last ``KEEP_RUNS`` runs) so best-N / tagged exports can use the
+        engine's own scores instead of trusting the client."""
+        if isinstance(workers, bool) or not isinstance(workers, int) or not 1 <= workers <= 64:
+            raise invalid_params("workers must be 1..64")
+        _core_check(core)
+
         def run(ctx: JobContext) -> dict:
-            reports: list[dict] = []
             total = len(ls)
+            kept: list[hc.HealthReport] = []
+            with runs_lock:
+                runs[ctx.id] = kept
+                while len(runs) > KEEP_RUNS:
+                    runs.popitem(last=False)
             done = [0]
             lock = threading.Lock()
 
@@ -384,13 +397,13 @@ def build(emit, sources: SourceManager | None = None
                 row = dataclasses.asdict(rep)
                 row["passed"] = rep.passed()
                 with lock:
-                    reports.append(row)
+                    kept.append(rep)
                     done[0] += 1
                     ctx.item(row)
                     ctx.progress(done[0], total)
 
             from concurrent.futures import ThreadPoolExecutor
-            ex = ThreadPoolExecutor(max_workers=int(workers))
+            ex = ThreadPoolExecutor(max_workers=workers)
             try:
                 futs = [ex.submit(one, x) for x in ls]
                 for f in futs:
@@ -404,9 +417,67 @@ def build(emit, sources: SourceManager | None = None
                         break
             finally:
                 ex.shutdown(wait=True, cancel_futures=ctx.stop.is_set())
-            reports.sort(key=lambda r: -r.get("score", 0))
-            return {"total": total, "passed": sum(1 for r in reports if r["passed"])}
-        return {"job": jobs.start("health.run", run)}
+            with lock:
+                passed = sum(1 for r in kept if r.passed())
+            return {"total": total, "passed": passed}
+        return jobs.start("health.run", run)
+
+    def _timeout(v: Any) -> float:
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0.5 <= v <= 120:
+            raise invalid_params("timeout must be 0.5..120 seconds")
+        return float(v)
+
+    @d.method("health.run")
+    def health_run(lines: list, workers: int = 8, timeout: float = 6.0,
+                   throughput: bool = True, core: str | None = None) -> dict:
+        ls = _lines(lines)
+        t = _timeout(timeout)
+        return {"job": _start_health(ls, workers, t, bool(throughput), core)}
+
+    @d.method("sub.check")
+    def sub_check(workers: int = 8, timeout: float = 6.0,
+                  throughput: bool = True, core: str | None = None) -> dict:
+        """Health-check the cached configs of every enabled subscription
+        source (``sub.fetch`` fills the cache).  Same job as ``health.run``;
+        the configs never cross the pipe."""
+        lines, removed = src_mgr().combined_lines()
+        if not lines:
+            raise invalid_params("no cached configs: fetch the sources first")
+        ls = _lines(lines)
+        t = _timeout(timeout)
+        return {"job": _start_health(ls, workers, t, bool(throughput), core),
+                "total": len(ls), "removed": removed}
+
+    def _run_reports(job: Any) -> list:
+        if not isinstance(job, str):
+            raise invalid_params("job must be a string")
+        with runs_lock:
+            kept = runs.get(job)
+            snap = list(kept) if kept is not None else None
+        if snap is None:
+            raise invalid_params(
+                f"no results for that run (the last {KEEP_RUNS} runs are kept)")
+        return snap
+
+    @d.method("health.export_best")
+    def health_export_best(job: str, top_n: int = 10) -> dict:
+        """Base64 subscription of the best ``top_n`` *working* configs of a
+        health run (works on a finished, cancelled or still running job)."""
+        if isinstance(top_n, bool) or not isinstance(top_n, int) or not 1 <= top_n <= 1000:
+            raise invalid_params("top_n must be 1..1000")
+        reports = _run_reports(job)
+        content = hc.export_best_subscription(reports, top_n)
+        count = len(base64.b64decode(content).decode().splitlines()) if content else 0
+        return {"content": content, "count": count}
+
+    @d.method("health.tagged")
+    def health_tagged(job: str, min_score: float = 0.0) -> dict:
+        """Working configs of a run, best first, each re-tagged with the
+        anti-DPI techniques that worked, e.g. ``name [fragment:5,94,1@2]``."""
+        if isinstance(min_score, bool) or not isinstance(min_score, (int, float)) \
+                or not 0 <= min_score <= 100:
+            raise invalid_params("min_score must be 0..100")
+        return {"lines": hc.tagged_lines(_run_reports(job), float(min_score))}
 
     # ----------------------------------------------------------------- jobs
     @d.method("job.cancel")

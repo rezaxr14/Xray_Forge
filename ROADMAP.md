@@ -72,8 +72,20 @@ See `docs/engine-api.md`.
   electron-builder config, PyInstaller one-folder engine, release workflow
   `desktop` job (Windows installer, Linux AppImage, checksums, optional GPG),
   `tools/smoke_engine.py` gate, `tools/check_version.py`; see
-  `docs/packaging.md`. **Not yet run**: the first `workflow_dispatch`/tag
-  build is the real test; unsigned installers; no lock file yet.
+  `docs/packaging.md`. `docs/packaging.md` records a green real-runner build
+  (run 39136895263, head 8efd63e); the installers were never launched by a
+  human and are unsigned.
+  - ✅ 4.1 Hardening (static + dry-run only; **not** run on a runner): all
+    actions pinned by commit SHA, read-only workflow token with
+    `contents: write` on the `release` job only, 15-min timeout on it,
+    `npm ci` in the desktop job; `tools/check_workflows.py` +
+    `tests/test_workflow_policy.py` enforce those rules and the
+    release.yml/electron-builder/lock-file consistency;
+    `tests/test_release_dryrun.py` runs release.yml's shell steps under bash
+    (packaging, checksums, GPG signing, version choice).
+  - ⬜ 4.2 Python lock file: `requirements-ci.in` and `tools/update_locks.sh`
+    exist, but no lock was generated (no PyPI in the sandbox). Run the script,
+    commit the locks, switch the workflows to `--require-hashes`.
 - ✅ Cores tab: detect xray/sing-box/mihomo (saved path, env, v2rayN, ./bin, PATH), set/clear path; `health.run` explains a missing core.
 - ✅ Step 5: reach parity with the Tk GUI, then retire it (`app.py`, `ui/`,
   GUI tests, CI steps). In order:

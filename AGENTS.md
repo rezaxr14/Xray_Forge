@@ -32,6 +32,9 @@ python -m xray_forge --help
 python -m xray_forge convert in.txt out.txt
 python -m xray_forge export in.txt out.yaml --format clash
 
+# workflow policy (pinned actions, permissions, release consistency)
+python tools/check_workflows.py
+
 # desktop app tests (Node 22+; Playwright for the end-to-end tests)
 cd electron && npm test
 ```

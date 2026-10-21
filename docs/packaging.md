@@ -53,6 +53,31 @@ installer and a 130 MB Linux AppImage. Three bugs only a real run exposed
 (missing pytest, version read from the wrong directory, no `zip` on Windows)
 are fixed; `tools/check_version.py --package` now reads the version from files.
 
+## Supply-chain hardening
+
+* **Actions are pinned by commit SHA** (`uses: owner/repo@<40 hex> # vX.Y.Z`) and the
+  workflow token is read-only (`permissions: contents: read`); only the `release` job
+  gets `contents: write`. `electron/package-lock.json` is committed and the desktop job
+  uses `npm ci`.
+* **`tools/check_workflows.py`** enforces those rules offline (also run by
+  `tests/test_workflow_policy.py`, so CI fails when someone adds `uses: x@v4`, a
+  `pwsh` step, an untrusted `${{ }}` inside `run:`, a floating `npm install`, a missing
+  timeout, installer globs that no longer match `electron/package.json`, or a lock file
+  that drifted from `package.json`). Unpinned `pip install` arguments are printed as
+  warnings only.
+* **`tests/test_release_dryrun.py`** executes the real `run:` scripts of `release.yml`
+  (packaging, checksums, GPG signing with a throw-away key, installer-version choice,
+  tag check) under bash on fake build output, and checks that what the jobs produce is
+  exactly what the release job uploads. It cannot show that PyInstaller or
+  electron-builder succeed, or that the actions run: only a real runner does.
+* **Python lock file: not generated yet.** The sandbox this was written in cannot reach
+  PyPI. `requirements-ci.in` + `tools/update_locks.sh` are ready: run the script once
+  with network access, commit `requirements.lock` / `requirements-ci.lock`, then change
+  the workflows to `pip install --require-hashes -r requirements-ci.lock` (and the pip
+  cache key to the lock file). Until then the advisory warnings remain.
+* Updating a pin: look up the tag's commit (`git ls-remote --tags <repo> 'refs/tags/vX.Y.Z*'`;
+  for an annotated tag use the `^{}` line), replace the SHA and the comment together.
+
 ## Still open
 
 - Windows installers are **unsigned**: SmartScreen will warn. Code signing

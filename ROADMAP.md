@@ -32,7 +32,7 @@ ships with a regression test that fails on the old code.
 Still open from the review (next sprints):
 
 - ⬜ ~~Split `app.py`~~ — superseded by Phase 7 (Tk GUI will be retired).
-- 🟡 Large scans and per-stage timeouts (step 7.6):
+- ✅ Large scans and per-stage timeouts (step 7.6):
   - ✅ 6.1 `ScanSession.run` funnel: bounded in-flight window (`workers * 4`),
     a stop that cancels queued work instead of probing the whole list, IPs cut
     short by stop stay pending (they used to be recorded as "tcp filtered"),
@@ -43,7 +43,12 @@ Still open from the review (next sprints):
   - ✅ 6.2 Engine: `scan.run` `tcp_timeout` / `tls_timeout` / `tcp_retries` and
     validation of `timeout`; `health.run` / `sub.check` `timeouts`
     (`dns`, `tcp`, `tls`, `request`, `transfer`).
-  - ⬜ 6.3 UI fields for these, persisted in `ui.settings_*`.
+  - ✅ 6.3 UI: IP scanner "Timeouts and retries" (TCP/TLS timeout, TCP
+    retries) and Health / Subscriptions-check "Stage timeouts" (DNS, TCP, TLS,
+    Request, Transfer). Blank = engine default and nothing is sent; values are
+    remembered via `ui.settings_*`. Verified by Playwright e2e against the real
+    engine (what is sent, engine validation messages, restart); not exercised:
+    a scan or check that actually hits a timeout on a real network.
 - ⬜ License decision (CC BY 4.0 is unusual for software) before the next
   release.
 - ⬜ SNI-spoofing helper binary (separate process, raw sockets).

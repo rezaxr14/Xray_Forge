@@ -1225,3 +1225,135 @@ test('health/check: anti-DPI options are sent only when set, and are remembered'
     assert.equal(await second.page.isChecked('#sk-pad'), true);
   } finally { await second.close(); }
 });
+
+test('scan: stage timeouts and retries are sent only when set, checked by the engine, remembered', opts, async () => {
+  const first = await launch();
+  const { home } = first;
+  try {
+    const pg = first.page;
+    await ready(pg);
+    await pg.evaluate(() => {
+      window.__sent = [];
+      const real = window.forge.call;
+      window.forge.call = (m, p) => { if (m === 'scan.run') window.__sent.push(p); return real(m, p); };
+    });
+    await pg.click('[data-tab=scan]');
+    await pg.fill('#sc-cidrs', '127.0.0.1/32');
+    await pg.fill('#sc-port', '9');
+    const done = () => pg.waitForFunction(() => /^done/.test(document.querySelector('#sc-status').textContent), null, { timeout: 30000 });
+
+    await pg.click('#sc-start');                               // nothing filled in: the engine's defaults stay in charge
+    await done();
+    assert.deepEqual(await pg.evaluate(() => Object.keys(window.__sent[0]).sort()),
+      ['cidrs', 'count', 'frag', 'geo', 'port', 'workers']);
+
+    await pg.click('#sc-adv summary');
+    await pg.fill('#sc-tcp-timeout', '1.5');
+    await pg.fill('#sc-tls-timeout', '2');
+    await pg.fill('#sc-tcp-retries', '0');                     // 0 is a value, not "empty"
+    await pg.click('#sc-start');
+    await pg.waitForFunction(() => window.__sent.length === 2);
+    const p = await pg.evaluate(() => window.__sent[1]);
+    assert.equal(p.tcp_timeout, 1.5);
+    assert.equal(p.tls_timeout, 2);
+    assert.equal(p.tcp_retries, 0);
+    await done();
+
+    await pg.fill('#sc-tls-timeout', '');                      // cleared again: omitted, retries still sent
+    await pg.click('#sc-start');
+    await pg.waitForFunction(() => window.__sent.length === 3);
+    assert.deepEqual(await pg.evaluate(() => ['tcp_timeout' in window.__sent[2], 'tls_timeout' in window.__sent[2], window.__sent[2].tcp_retries]),
+      [true, false, 0]);
+    await done();
+
+    await pg.fill('#sc-tcp-timeout', '0');                     // the engine's validation reaches the status line
+    await pg.click('#sc-start');
+    await pg.waitForFunction(() => /tcp_timeout must be 0\.2\.\.120/.test(document.querySelector('#sc-status').textContent));
+    assert.equal(await pg.isDisabled('#sc-start'), false);
+    await pg.fill('#sc-tcp-timeout', '1.5');
+    await pg.fill('#sc-tcp-retries', '9');
+    await pg.click('#sc-start');
+    await pg.waitForFunction(() => /tcp_retries must be an integer 0\.\.5/.test(document.querySelector('#sc-status').textContent));
+    await pg.fill('#sc-tcp-retries', '1');
+    for (let i = 0; i < 100; i++) {
+      if ((await first.engine.call('ui.settings_get', {})).settings['sc-tcp-retries'] === '1') break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  } finally { await first.close(); }
+
+  const second = await launch({ home });
+  try {
+    await ready(second.page);
+    await second.page.waitForFunction(() => document.querySelector('#sc-tcp-retries').value === '1');
+    assert.equal(await second.page.inputValue('#sc-tcp-timeout'), '1.5');
+    assert.equal(await second.page.inputValue('#sc-tls-timeout'), '');
+  } finally { await second.close(); }
+});
+
+test('health/check: per-stage timeouts are sent only for the stages filled in, and remembered', opts, async () => {
+  const first = await launch();
+  const { home } = first;
+  try {
+    const pg = first.page;
+    await ready(pg);
+    await pg.evaluate(() => {
+      window.__sent = [];
+      const real = window.forge.call;
+      window.forge.call = (m, p) => { if (m === 'health.run' || m === 'sub.check') window.__sent.push([m, p]); return real(m, p); };
+    });
+    await pg.fill('#cfg-input', DEAD);
+    await pg.click('#cfg-parse');
+    await pg.waitForSelector('#cfg-table tbody tr');
+    await pg.click('[data-tab=health]');
+    await pg.uncheck('#hc-throughput');
+    await pg.click('#hc-adv summary');
+    const done = () => pg.waitForFunction(() => /^done/.test(document.querySelector('#hc-status').textContent), null, { timeout: 30000 });
+
+    await pg.fill('#hc-t-tcp', '1.5');
+    await pg.click('#hc-start');
+    await pg.waitForFunction(() => window.__sent.length === 1);
+    assert.deepEqual(await pg.evaluate(() => window.__sent[0][1].timeouts), { tcp: 1.5 });
+    await done();
+
+    await pg.fill('#hc-t-dns', '3');
+    await pg.fill('#hc-t-tls', '2');
+    await pg.fill('#hc-t-request', '4');
+    await pg.fill('#hc-t-transfer', '30');
+    await pg.click('#hc-start');
+    await pg.waitForFunction(() => window.__sent.length === 2);
+    assert.deepEqual(await pg.evaluate(() => window.__sent[1][1].timeouts),
+      { dns: 3, tcp: 1.5, tls: 2, request: 4, transfer: 30 });
+    await done();
+
+    for (const id of ['dns', 'tcp', 'tls', 'request', 'transfer']) await pg.fill(`#hc-t-${id}`, '');
+    await pg.click('#hc-start');                               // all blank: no `timeouts` key at all
+    await pg.waitForFunction(() => window.__sent.length === 3);
+    assert.equal(await pg.evaluate(() => 'timeouts' in window.__sent[2][1]), false);
+    await done();
+
+    await pg.fill('#hc-t-tcp', '0');                           // engine validation reaches the status line
+    await pg.click('#hc-start');
+    await pg.waitForFunction(() => /timeouts\.tcp must be 0\.5\.\.120/.test(document.querySelector('#hc-status').textContent));
+    assert.equal(await pg.isDisabled('#hc-start'), false);
+    await pg.fill('#hc-t-tcp', '2.5');
+
+    await pg.click('[data-tab=subs]');
+    await pg.click('#sk-adv summary');
+    await pg.fill('#sk-t-transfer', '25');
+    await pg.click('#sk-start');
+    await pg.waitForFunction(() => window.__sent.some(([m]) => m === 'sub.check'));
+    assert.deepEqual(await pg.evaluate(() => window.__sent.find(([m]) => m === 'sub.check')[1].timeouts), { transfer: 25 });
+    for (let i = 0; i < 100; i++) {
+      if ((await first.engine.call('ui.settings_get', {})).settings['sk-t-transfer'] === '25') break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  } finally { await first.close(); }
+
+  const second = await launch({ home });
+  try {
+    await ready(second.page);
+    await second.page.waitForFunction(() => document.querySelector('#sk-t-transfer').value === '25');
+    assert.equal(await second.page.inputValue('#hc-t-tcp'), '2.5');
+    assert.equal(await second.page.inputValue('#hc-t-dns'), '');
+  } finally { await second.close(); }
+});

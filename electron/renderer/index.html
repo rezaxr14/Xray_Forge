@@ -182,7 +182,7 @@
         <button id="hc-keep" disabled>Keep passing → Configs</button>
       </div>
       <details class="adv" id="hc-adv">
-        <summary>Anti-DPI options (native probes)</summary>
+        <summary>Stage timeouts and anti-DPI options</summary>
         <div class="row">
           <label>Fragment variants <input id="hc-frag" type="text" size="30" list="frag-presets" placeholder="off 5,94,1@2 rand:1-16@2 (default)" aria-label="fragment variants, separated by spaces"></label>
           <label>Fake SNI <input id="hc-fake" type="text" size="22" placeholder="e.g. www.microsoft.com"></label>
@@ -191,6 +191,14 @@
           <label><input id="hc-pad" type="checkbox"> Pad ClientHello</label>
         </div>
         <p class="muted small">Used by the built-in TLS / WebSocket probes; checks run through a proxy core ignore them.</p>
+              <div class="row">
+          <label>DNS (s) <input id="hc-t-dns" type="number" min="0.5" max="120" step="0.5" placeholder="4"></label>
+          <label>TCP (s) <input id="hc-t-tcp" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+          <label>TLS (s) <input id="hc-t-tls" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+          <label>Request (s) <input id="hc-t-request" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+          <label>Transfer (s) <input id="hc-t-transfer" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+        </div>
+        <p class="muted small">Stage timeouts; blank = the Timeout above (DNS: 4 s). TLS applies to each fragment variant; Transfer covers download and upload.</p>
       </details>
       <div class="row">
         <progress id="hc-progress" value="0" max="1"></progress>
@@ -233,7 +241,7 @@
           <button id="sk-cancel" disabled>Cancel</button>
         </div>
       <details class="adv" id="sk-adv">
-        <summary>Anti-DPI options (native probes)</summary>
+        <summary>Stage timeouts and anti-DPI options</summary>
         <div class="row">
           <label>Fragment variants <input id="sk-frag" type="text" size="30" list="frag-presets" placeholder="off 5,94,1@2 rand:1-16@2 (default)" aria-label="fragment variants, separated by spaces"></label>
           <label>Fake SNI <input id="sk-fake" type="text" size="22" placeholder="e.g. www.microsoft.com"></label>
@@ -242,6 +250,14 @@
           <label><input id="sk-pad" type="checkbox"> Pad ClientHello</label>
         </div>
         <p class="muted small">Used by the built-in TLS / WebSocket probes; checks run through a proxy core ignore them.</p>
+              <div class="row">
+          <label>DNS (s) <input id="sk-t-dns" type="number" min="0.5" max="120" step="0.5" placeholder="4"></label>
+          <label>TCP (s) <input id="sk-t-tcp" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+          <label>TLS (s) <input id="sk-t-tls" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+          <label>Request (s) <input id="sk-t-request" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+          <label>Transfer (s) <input id="sk-t-transfer" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+        </div>
+        <p class="muted small">Stage timeouts; blank = the Timeout above (DNS: 4 s). TLS applies to each fragment variant; Transfer covers download and upload.</p>
       </details>
         <div class="row">
           <progress id="sk-progress" value="0" max="1"></progress>
@@ -304,6 +320,15 @@
           <label>Workers <input id="sc-workers" type="number" min="1" max="256" value="64"></label>
         </div>
       </div>
+      <details class="adv" id="sc-adv">
+        <summary>Timeouts and retries</summary>
+        <div class="row">
+          <label>TCP timeout (s) <input id="sc-tcp-timeout" type="number" min="0.2" max="120" step="0.1" placeholder="5"></label>
+          <label>TLS timeout (s) <input id="sc-tls-timeout" type="number" min="0.2" max="120" step="0.1" placeholder="5"></label>
+          <label>TCP retries <input id="sc-tcp-retries" type="number" min="0" max="5" step="1" placeholder="1"></label>
+        </div>
+        <p class="muted small">Blank = the engine's defaults (5 s, 1 retry). Retries are extra connects for a host that never answered; 0 makes unreachable IPs cheap in large scans.</p>
+      </details>
       <div class="row">
         <label>Add ranges <select id="sc-preset"><option value="">(preset)</option></select></label>
         <label><input id="sc-geo" type="checkbox"> Look up country / ISP</label>

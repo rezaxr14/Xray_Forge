@@ -428,7 +428,20 @@ function probeOpts(p) {
   if ($(`#${p}-front`).value.trim()) o.front_host = $(`#${p}-front`).value.trim();
   if ($(`#${p}-rec`).checked) o.record_frag = true;
   if ($(`#${p}-pad`).checked) o.pad_hello = true;
+  const timeouts = stageTimeouts(p);
+  if (timeouts) o.timeouts = timeouts;
   return o;
+}
+
+// Per-stage timeouts of a panel; only the stages filled in are sent, the rest follow "Timeout".
+const STAGES = ['dns', 'tcp', 'tls', 'request', 'transfer'];
+function stageTimeouts(p) {
+  const t = {};
+  for (const s of STAGES) {
+    const v = $(`#${p}-t-${s}`).value.trim();
+    if (v !== '') t[s] = Number(v);
+  }
+  return Object.keys(t).length ? t : null;
 }
 
 function healthRow(r, sel) {
@@ -718,6 +731,10 @@ async function startScan(resume) {
   };
   if ($('#sc-sni').value.trim()) params.sni = $('#sc-sni').value.trim();
   params.frag = $('#sc-frag').value.trim() || 'off';
+  for (const [id, key] of [['sc-tcp-timeout', 'tcp_timeout'], ['sc-tls-timeout', 'tls_timeout'], ['sc-tcp-retries', 'tcp_retries']]) {
+    const v = $(`#${id}`).value.trim();
+    if (v !== '') params[key] = Number(v);          // blank = engine default; 0 is a real value
+  }
   if (resume) { params.resume = true; params.session = $('#sc-sessions').value; }
   const r = await call('scan.run', params);
   sc.rows = new Map();
@@ -1023,6 +1040,8 @@ const PERSIST = [
   'sk-workers', 'sk-timeout', 'sk-core', 'sk-throughput', 'sk-n',
   'hc-frag', 'hc-fake', 'hc-front', 'hc-rec', 'hc-pad', 'sk-frag', 'sk-fake', 'sk-front', 'sk-rec', 'sk-pad',
   'sc-cidrs', 'sc-count', 'sc-port', 'sc-sni', 'sc-frag', 'sc-workers', 'sc-geo', 'sc-dead', 'sc-fmt',
+  'sc-tcp-timeout', 'sc-tls-timeout', 'sc-tcp-retries',
+  ...['hc', 'sk'].flatMap((p) => ['dns', 'tcp', 'tls', 'request', 'transfer'].map((s) => `${p}-t-${s}`)),
   'sn-snis', 'sn-presets', 'sn-http', 'sn-port', 'sn-frag', 'sn-workers', 'sn-fmt',
   'wp-count', 'wp-format', 'mt-use-ca', 'mt-platform', 'mt-cn', 'mt-permitted',
 ];

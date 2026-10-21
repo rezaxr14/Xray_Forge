@@ -33,6 +33,13 @@ def invalid_params(msg: str) -> RpcError:
     return RpcError(INVALID_PARAMS, msg)
 
 
+def seconds(v, what: str, lo: float, hi: float) -> float:
+    """A timeout in seconds: a real number (not a bool/str) within ``lo..hi``."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi:
+        raise invalid_params(f"{what} must be {lo:g}..{hi:g} seconds")
+    return float(v)
+
+
 class Dispatcher:
     def __init__(self) -> None:
         self._methods: dict[str, Callable[..., Any]] = {}

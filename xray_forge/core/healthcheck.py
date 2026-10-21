@@ -362,6 +362,10 @@ def score_report(report: HealthReport) -> float:
     return min(100.0, total)
 
 
+STAGE_TIMEOUT_KEYS = ("dns", "tcp", "tls", "request", "transfer")
+DEFAULT_DNS_TIMEOUT = 4.0
+
+
 def run_health_check(line: str,
                      frag_variants: tuple[str, ...] = DEFAULT_FRAG_VARIANTS,
                      do_dns: bool = True,
@@ -372,14 +376,26 @@ def run_health_check(line: str,
                      upload_bytes: int = DEFAULT_UPLOAD_BYTES,
                      core: str | None = None,
                      core_binary: str | None = None,
-                     tls_opts: TlsOptions | None = None) -> HealthReport:
+                     tls_opts: TlsOptions | None = None,
+                     timeouts: dict[str, float] | None = None) -> HealthReport:
     """Run the full staged pipeline for one share-link.
+
+    ``timeout`` bounds every stage; ``timeouts`` overrides it per stage
+    (keys ``dns``, ``tcp``, ``tls``, ``request``, ``transfer``; ``transfer``
+    covers download and upload).  Without a ``dns`` entry the DNS stage keeps
+    its own 4 s default.  ``tls`` applies to each fragmentation variant tried.
 
     ``core`` ("xray" | "singbox" | "mihomo" | "auto") enables core-backed
     checks: when the native tunnel can't run the protocol, the request and
     throughput stages go through a locally spawned core's SOCKS inbound
     instead of failing.
     """
+    unknown = sorted(set(timeouts or {}) - set(STAGE_TIMEOUT_KEYS))
+    if unknown:
+        raise ValueError(f"unknown stage timeout {unknown[0]!r}; "
+                         f"use one of {', '.join(STAGE_TIMEOUT_KEYS)}")
+    st = {k: (timeouts or {}).get(k, timeout) for k in STAGE_TIMEOUT_KEYS}
+    dns_timeout = (timeouts or {}).get("dns", DEFAULT_DNS_TIMEOUT)
     out = parse_target(line)
     if out is None:
         rep = HealthReport(line=line)
@@ -388,13 +404,13 @@ def run_health_check(line: str,
     rep = HealthReport(line=line, name=out.name, scheme=out.scheme,
                        endpoint=out.endpoint)
     if do_dns:
-        rep.stages.append(probe_dns(out.host))
-    rep.stages.append(probe_tcp(out.host, out.port, timeout=timeout))
+        rep.stages.append(probe_dns(out.host, timeout=dns_timeout))
+    rep.stages.append(probe_tcp(out.host, out.port, timeout=st["tcp"]))
     tcp_ok = rep.stage("tcp") is not None and rep.stage("tcp").ok
     if tcp_ok:
         # short-circuit: no TCP, no point trying TLS/request/throughput
         extra = {"opts": tls_opts} if tls_opts is not None and tls_opts.active() else {}
-        tls_res, (tc, sock), tag = probe_tls(out, frag_variants, timeout=timeout,
+        tls_res, (tc, sock), tag = probe_tls(out, frag_variants, timeout=st["tls"],
                                              stop=stop, **extra)
         if tag:
             rep.techniques.append(tag)
@@ -409,9 +425,9 @@ def run_health_check(line: str,
                     except Exception as e:  # core missing / died on start
                         rep.stages.append(StageResult(
                             "core", False, detail=str(e)[:60] or type(e).__name__))
-                req_res = probe_request(out, tc, sock, timeout=timeout, stop=stop, **extra)
+                req_res = probe_request(out, tc, sock, timeout=st["request"], stop=stop, **extra)
                 if not req_res.ok and socks is not None:
-                    sres = probe_request_socks(socks, timeout=timeout, stop=stop)
+                    sres = probe_request_socks(socks, timeout=st["request"], stop=stop)
                     if sres.ok:
                         req_res = sres
                 rep.stages.append(req_res)
@@ -419,15 +435,15 @@ def run_health_check(line: str,
                     factory = None
                     if out.scheme == "vless" and out.transport == "ws":
                         factory = native_tunnel_factory(
-                            out, tls_res.data.get("variant", ""), timeout, stop, **extra)
+                            out, tls_res.data.get("variant", ""), st["transfer"], stop, **extra)
                     # download uses the session the request stage upgraded;
                     # upload gets its own fresh one (one VLESS conn per WS)
                     rep.stages.append(probe_throughput(out, tc, sock, "download",
-                                                       timeout=timeout, stop=stop,
+                                                       timeout=st["transfer"], stop=stop,
                                                        socks_port=socks))
                     rep.stages.append(probe_throughput(out, tc, sock, "upload",
                                                        bytes_count=upload_bytes,
-                                                       timeout=timeout, stop=stop,
+                                                       timeout=st["transfer"], stop=stop,
                                                        socks_port=socks,
                                                        tunnel_factory=factory))
         try:

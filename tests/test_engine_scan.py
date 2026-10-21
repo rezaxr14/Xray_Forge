@@ -13,7 +13,7 @@ from tests.test_engine import Client
 
 
 def _fake_scan(monkeypatch, alive_octets=(1, 2)):
-    def jitter(ip, port, attempts=2, timeout=5.0):
+    def jitter(ip, port, attempts=2, timeout=5.0, **kw):
         ok = int(ip.rsplit(".", 1)[1]) in alive_octets
         return (10.0, 1.0) if ok else (None, None)
 
@@ -52,7 +52,7 @@ def test_scan_cancel_keeps_rest_pending(monkeypatch):
     gate = threading.Event()
     started = threading.Event()
 
-    def jitter(ip, port, attempts=2, timeout=5.0):
+    def jitter(ip, port, attempts=2, timeout=5.0, **kw):
         started.set()
         gate.wait(3)
         return (None, None)
@@ -72,7 +72,7 @@ def test_scan_resume_without_ranges(monkeypatch):
     gate, started = threading.Event(), threading.Event()
     calls = []
 
-    def jitter(ip, port, attempts=2, timeout=5.0):
+    def jitter(ip, port, attempts=2, timeout=5.0, **kw):
         calls.append(ip)
         started.set()
         if not gate.is_set():

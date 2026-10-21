@@ -136,26 +136,37 @@ def ip_meta(ip: str, timeout: float = 5.0) -> tuple[str, str]:
 
 
 def tcp_jitter(host: str, port: str, attempts: int = 3,
-               timeout: float = 3.0) -> tuple[float | None, float]:
-    """Best connect latency and jitter (max-min over successful samples)."""
+               timeout: float = 3.0, retries: int = 1,
+               stop=None) -> tuple[float | None, float]:
+    """Best connect latency and jitter (max-min over successful samples).
+
+    ``attempts`` successful connects are sampled.  A host that has not
+    answered at all is retried ``retries`` more times (1 = the historical
+    "two tries" behaviour, 0 = a filtered host costs a single ``timeout``);
+    once it has answered, further failures only end the sampling.  ``stop``
+    (a ``threading.Event``) is checked before every connect.
+    """
+    import time
     samples: list[float] = []
-    for _ in range(max(2, attempts)):
-        if len(samples) >= attempts:
+    failures = 0
+    for _ in range(max(attempts, 1 + max(0, retries))):
+        if len(samples) >= attempts or (stop is not None and stop.is_set()):
             break
-        t0 = __import__("time").perf_counter()
+        t0 = time.perf_counter()
         try:
             s = socket.create_connection((host, int(port)), timeout=timeout)
             s.close()
         except OSError:
+            failures += 1
+            if not samples and failures > max(0, retries):
+                break
             continue
-        samples.append((__import__("time").perf_counter() - t0) * 1000)
+        samples.append((time.perf_counter() - t0) * 1000)
     if not samples:
         return None, 0.0
     best = min(samples)
     jitter = (max(samples) - min(samples)) if len(samples) > 1 else 0.0
     return best, jitter
-
-
 
 
 def cc_of_ip(ip: str, timeout: float = 4.0) -> str:

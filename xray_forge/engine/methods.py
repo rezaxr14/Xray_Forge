@@ -30,7 +30,7 @@ from xray_forge.core.sub_source import SourceManager
 from xray_forge.core.subscription import text_to_lines
 from xray_forge.engine import PROTOCOL_VERSION
 from xray_forge.engine.jobs import JobContext, JobManager
-from xray_forge.engine.rpc import Dispatcher, invalid_params
+from xray_forge.engine.rpc import Dispatcher, invalid_params, seconds
 
 MAX_LINES = 20000
 KEEP_RUNS = 4          # health runs whose reports stay available for export
@@ -458,19 +458,32 @@ def build(emit, sources: SourceManager | None = None
         return jobs.start("health.run", run)
 
     def _timeout(v: Any) -> float:
-        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0.5 <= v <= 120:
-            raise invalid_params("timeout must be 0.5..120 seconds")
-        return float(v)
+        return seconds(v, "timeout", 0.5, 120)
+
+    def _stage_timeouts(v: Any) -> dict[str, float] | None:
+        """``{"tcp": 3, "tls": 4, "transfer": 30, ...}``: per-stage overrides of ``timeout``."""
+        if v is None:
+            return None
+        if not isinstance(v, dict):
+            raise invalid_params("timeouts must be an object like {\"tcp\": 3, \"transfer\": 30}")
+        bad = sorted(k for k in v if k not in hc.STAGE_TIMEOUT_KEYS)
+        if bad:
+            raise invalid_params(f"unknown stage {str(bad[0])[:30]!r} in timeouts; "
+                                 f"use {', '.join(hc.STAGE_TIMEOUT_KEYS)}")
+        return {k: seconds(x, f"timeouts.{k}", 0.5, 120) for k, x in v.items()} or None
 
     @d.method("health.run")
     def health_run(lines: list, workers: int = 8, timeout: float = 6.0,
                    throughput: bool = True, core: str | None = None,
                    fake_sni: Any = None, front_host: Any = None,
                    record_frag: Any = False, pad_hello: Any = False,
-                   frag_variants: Any = None) -> dict:
+                   frag_variants: Any = None, timeouts: Any = None) -> dict:
         ls = _lines(lines)
         t = _timeout(timeout)
         kw = _health_kwargs(fake_sni, front_host, record_frag, pad_hello, frag_variants)
+        stage_t = _stage_timeouts(timeouts)
+        if stage_t:
+            kw["timeouts"] = stage_t
         return {"job": _start_health(ls, workers, t, bool(throughput), core, kw)}
 
     @d.method("sub.check")
@@ -478,7 +491,7 @@ def build(emit, sources: SourceManager | None = None
                   throughput: bool = True, core: str | None = None,
                   fake_sni: Any = None, front_host: Any = None,
                   record_frag: Any = False, pad_hello: Any = False,
-                  frag_variants: Any = None) -> dict:
+                  frag_variants: Any = None, timeouts: Any = None) -> dict:
         """Health-check the cached configs of every enabled subscription
         source (``sub.fetch`` fills the cache).  Same job as ``health.run``;
         the configs never cross the pipe."""
@@ -488,6 +501,9 @@ def build(emit, sources: SourceManager | None = None
         ls = _lines(lines)
         t = _timeout(timeout)
         kw = _health_kwargs(fake_sni, front_host, record_frag, pad_hello, frag_variants)
+        stage_t = _stage_timeouts(timeouts)
+        if stage_t:
+            kw["timeouts"] = stage_t
         return {"job": _start_health(ls, workers, t, bool(throughput), core, kw),
                 "total": len(ls), "removed": removed}
 

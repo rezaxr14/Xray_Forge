@@ -18,7 +18,7 @@ def wired(monkeypatch):
     monkeypatch.setattr("xray_forge.core.scan_session.sample_cidr",
                         lambda cidr, count: [f"1.2.3.{i}" for i in range(1, count + 1)])
     monkeypatch.setattr("xray_forge.core.scan_session.tcp_jitter",
-                        lambda ip, port, attempts=2, timeout=3.0:
+                        lambda ip, port, attempts=2, timeout=3.0, **kw:
                         (40.0, 3.0) if ip.endswith(("1", "2", "3")) else (None, 0.0))
     def fake_tls_connect(ip, port, sni=None, frag=None, timeout=5.0, stop=None, **kw):
         if ip.endswith(("1", "2", "3")):

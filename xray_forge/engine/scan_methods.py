@@ -21,10 +21,11 @@ from xray_forge.core.sni_search import (
     DEFAULT_SNI_CANDIDATES, SniSearch, targets_from_scan,
 )
 from xray_forge.engine.jobs import JobContext, JobManager
-from xray_forge.engine.rpc import Dispatcher, invalid_params
+from xray_forge.engine.rpc import Dispatcher, invalid_params, seconds
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 MAX_TARGETS = 100000
+SCAN_T_MIN, SCAN_T_MAX = 0.2, 120.0      # seconds, for scan timeouts
 
 
 def _session_name(name: str | None, prefix: str) -> str:
@@ -166,7 +167,14 @@ def register(d: Dispatcher, jobs: JobManager) -> None:
                  sni: str | None = None, workers: int = 64,
                  frag: str = "5,94,1@2", geo: bool = False,
                  timeout: float = 5.0, session: str | None = None,
-                 resume: bool = False) -> dict:
+                 resume: bool = False, tcp_timeout: Any = None,
+                 tls_timeout: Any = None, tcp_retries: Any = 1) -> dict:
+        timeout = seconds(timeout, "timeout", SCAN_T_MIN, SCAN_T_MAX)
+        tcp_t = None if tcp_timeout is None else seconds(tcp_timeout, "tcp_timeout", SCAN_T_MIN, SCAN_T_MAX)
+        tls_t = None if tls_timeout is None else seconds(tls_timeout, "tls_timeout", SCAN_T_MIN, SCAN_T_MAX)
+        if isinstance(tcp_retries, bool) or not isinstance(tcp_retries, int) or not 0 <= tcp_retries <= 5:
+            raise invalid_params("tcp_retries must be an integer 0..5")
+        retries = tcp_retries
         cidr_list = _str_list(cidrs, "cidrs")
         if not cidr_list and not resume:
             raise invalid_params("cidrs must not be empty")
@@ -187,7 +195,8 @@ def register(d: Dispatcher, jobs: JobManager) -> None:
 
         def run(ctx: JobContext) -> dict:
             sess.run(port=port, workers=workers, frag=frag, sni=sni or None,
-                     geo=bool(geo), timeout=float(timeout), stop=ctx.stop,
+                     geo=bool(geo), timeout=timeout, stop=ctx.stop,
+                     tcp_timeout=tcp_t, tls_timeout=tls_t, tcp_retries=retries,
                      progress=ctx.progress,
                      on_result=lambda r: ctx.item(r.to_dict()))
             return {"session": name, "alive": len(sess.alive()),

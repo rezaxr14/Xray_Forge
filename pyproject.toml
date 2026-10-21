@@ -7,6 +7,10 @@ name = "xray-forge"
 version = "2.1.0"
 description = "Full Xray config utility, tester, bridge, IP finder, subscription health-checker"
 readme = "README.md"
+license = {text = "Apache-2.0"}
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+]
 authors = [{ name = "Xray Forge Contributors" }]
 # 3.10+ required: the codebase uses PEP 604 unions at runtime
 # (modules also carry `from __future__ import annotations` for safety).

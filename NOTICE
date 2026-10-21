@@ -1,0 +1,10 @@
+Xray Forge
+Copyright 2026 Reza Nadimi
+
+This product includes software developed by Reza Nadimi and the Xray Forge
+contributors. It is licensed under the Apache License, Version 2.0 (see
+LICENSE).
+
+Xray Forge talks to, and can launch, third-party proxy cores (Xray-core,
+sing-box, mihomo). Those programs are not part of this work and keep their own
+licenses; they are neither bundled nor relicensed by it.

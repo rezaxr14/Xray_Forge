@@ -144,13 +144,12 @@ them (with SHA-256 checksums) to a GitHub Release.
 
 ## 📄 License
 
-This project is licensed under the **Creative Commons Attribution 4.0 International (CC BY 4.0)**.
+Xray Forge is licensed under the **Apache License, Version 2.0**.
 
-You are free to:
-- **Share** — copy and redistribute the material in any medium or format
-- **Adapt** — remix, transform, and build upon the material for any purpose, even commercially
-
-As long as you give appropriate credit, provide a link to the license, and indicate if changes were made.
+You may use, modify and distribute it, including commercially, as long as you
+keep the license and the [`NOTICE`](NOTICE) file, state significant changes, and
+do not use the project's name to endorse derived products. The license also
+grants a patent license from contributors.
 
 See [`LICENSE`](LICENSE) for the full legal text.
 

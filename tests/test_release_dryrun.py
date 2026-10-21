@@ -77,6 +77,7 @@ class Runner:
         self.home.mkdir(parents=True)
         shutil.copy(ROOT / "README.md", self.repo / "README.md")
         shutil.copy(ROOT / "LICENSE", self.repo / "LICENSE")
+        shutil.copy(ROOT / "NOTICE", self.repo / "NOTICE")
         shutil.copy(ROOT / "pyproject.toml", self.repo / "pyproject.toml")
         (self.repo / "tools").mkdir()
         shutil.copy(ROOT / "tools" / "check_version.py", self.repo / "tools" / "check_version.py")
@@ -122,7 +123,7 @@ def test_cli_package_linux_zip_has_executable_readme_and_license(run):
     run.write(f"dist/{mx['exe']}", b"\x7fELF fake", mode=0o644)
     ok(run.step("build", "Package (Linux)", mx))
     z = zipfile.ZipFile(run.repo / "dist" / f"{mx['artifact']}.zip")
-    assert sorted(z.namelist()) == sorted([mx["exe"], "LICENSE", "README.md"])
+    assert sorted(z.namelist()) == sorted([mx["exe"], "LICENSE", "NOTICE", "README.md"])
     assert (z.getinfo(mx["exe"]).external_attr >> 16) & 0o111, "the binary lost its executable bit"
 
 
@@ -131,15 +132,16 @@ def test_cli_package_windows_zip_uses_stdlib_archiver(run):
     run.write(f"dist/{mx['exe']}", b"MZ fake")
     ok(run.step("build", "Package (Windows)", mx))
     z = zipfile.ZipFile(run.repo / "dist" / f"{mx['artifact']}.zip")
-    assert sorted(z.namelist()) == sorted([mx["exe"], "LICENSE", "README.md"])
+    assert sorted(z.namelist()) == sorted([mx["exe"], "LICENSE", "NOTICE", "README.md"])
 
 
-def test_cli_package_falls_back_to_readme_when_license_is_missing(run):
+@pytest.mark.parametrize("missing", ["LICENSE", "NOTICE"])
+def test_cli_package_fails_when_a_legal_file_is_missing(run, missing):
     mx = entry("build", "windows-latest")
     run.write(f"dist/{mx['exe']}", b"MZ fake")
-    (run.repo / "LICENSE").unlink()
-    ok(run.step("build", "Package (Windows)", mx))
-    assert sorted(zipfile.ZipFile(run.repo / "dist" / f"{mx['artifact']}.zip").namelist()) == sorted([mx["exe"], "README.md"])
+    (run.repo / missing).unlink()
+    r = run.step("build", "Package (Windows)", mx)
+    assert r.returncode != 0 and missing in r.stderr, "an archive without its license must not be published"
 
 
 @pytest.mark.parametrize("os_name", ["ubuntu-latest", "windows-latest"])
@@ -246,6 +248,26 @@ def test_stage_engine_replaces_a_stale_copy(run):
     staged = run.repo / "electron" / "engine-dist"
     assert not (staged / "stale.txt").exists()
     assert (staged / "xray-forge-engine").read_bytes() == b"bin" and (staged / "_internal" / "lib.so").exists()
+
+
+def test_installer_gets_license_and_notice_staged_where_electron_builder_reads_them(run):
+    ok(run.step("desktop", "Stage license files for the installer"))
+    legal = run.repo / "electron" / "legal"
+    assert (legal / "LICENSE").read_bytes() == (ROOT / "LICENSE").read_bytes()
+    assert (legal / "NOTICE").read_bytes() == (ROOT / "NOTICE").read_bytes()
+    import json
+    extra = json.loads((ROOT / "electron" / "package.json").read_text())["build"]["extraResources"]
+    assert {"from": "legal", "to": "legal"} in extra
+
+
+def test_license_staging_fails_without_the_files(run):
+    (run.repo / "NOTICE").unlink()
+    assert run.step("desktop", "Stage license files for the installer").returncode != 0
+
+
+def test_license_staging_runs_before_the_installer_is_built():
+    names = [s.get("name") for s in WORKFLOW["jobs"]["desktop"]["steps"]]
+    assert names.index("Stage license files for the installer") < names.index("Build the installer")
 
 
 def _stub_npx(run: Runner) -> pathlib.Path:

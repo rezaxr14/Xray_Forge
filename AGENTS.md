@@ -12,7 +12,7 @@ fake SNI, domain fronting, and a local MITM-DomainFronting config generator.
 It ships an Electron desktop app (UI over the Python engine, JSON-RPC on stdio;
 see `docs/engine-api.md`) and a fully headless CLI. The Tkinter GUI is retired.
 
-License: **CC BY 4.0**. Do not paste GPL-licensed code into this repo
+License: **Apache-2.0**. Do not paste GPL-licensed code into this repo
 (see *Licensing constraints* below).
 
 ## Commands
@@ -130,8 +130,11 @@ tests/                   pytest suite (offline; see Testing rules)
 
 ## Licensing constraints (important)
 
-- This repo is CC BY 4.0. **Never copy code from GPL-licensed projects**
-  (patterniha/*, Xray-core is Apache-2.0 and fine to *read* for API shape).
+- This repo is Apache-2.0. **Never copy code from GPL-licensed projects**
+  (patterniha/*): GPL code cannot be combined into an Apache-2.0 work without
+  relicensing the whole project. Xray-core is Apache-2.0 and fine to *read*
+  for API shape. Keep `LICENSE` byte-identical to the official text (a test
+  checks its hash) and keep `NOTICE` shipped with every release archive.
 - Techniques are re-implemented from public documentation. When implementing
   from an upstream repo, write original code and note the documented source
   in the docstring (see `core/domainfront.py` for the pattern).

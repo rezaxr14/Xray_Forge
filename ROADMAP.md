@@ -49,8 +49,9 @@ Still open from the review (next sprints):
     remembered via `ui.settings_*`. Verified by Playwright e2e against the real
     engine (what is sent, engine validation messages, restart); not exercised:
     a scan or check that actually hits a timeout on a real network.
-- ⬜ License decision (CC BY 4.0 is unusual for software) before the next
-  release.
+- ✅ License: Apache-2.0 (relicensed; the sole author agreed). `LICENSE` is the official text,
+  `NOTICE` and the package metadata agree (`tests/test_license.py`); release
+  archives and installers ship both files.
 - ⬜ SNI-spoofing helper binary (separate process, raw sockets).
 - 🟡 MASQUE and Psiphon spikes: findings in `docs/spikes-masque-psiphon.md`
   (MASQUE only confirmed in the `sing-box-extended` fork; Psiphon needs the
@@ -318,7 +319,7 @@ pass latency checks while being unusable.
 
 ## Risks / decisions to keep in view
 
-- **Licensing**: patterniha repos are GPL-3.0; Xray Forge is CC BY 4.0.
+- **Licensing**: patterniha repos are GPL-3.0; Xray Forge is Apache-2.0.
   Everything from those projects is re-implemented from documented behavior
   (`AGENTS.md` → Licensing constraints). If GPL code is ever required, the
   project must relicense first.

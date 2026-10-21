@@ -17,6 +17,7 @@ let win = null;
 function createWindow() {
   win = new BrowserWindow({
     width: 1280, height: 860, backgroundColor: '#0f1419', title: 'Xray Forge',
+    icon: path.join(__dirname, 'assets', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true, nodeIntegration: false, sandbox: true,

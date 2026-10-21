@@ -100,6 +100,8 @@ See `docs/engine-api.md`.
     release.yml/electron-builder/lock-file consistency;
     `tests/test_release_dryrun.py` runs release.yml's shell steps under bash
     (packaging, checksums, GPG signing, version choice).
+  - ✅ 4.3 App icons (`electron/assets`, generator `tools/make_icons.py`) wired
+    into electron-builder and the window; unverified in a real installer.
   - ⬜ 4.2 Python lock file: `requirements-ci.in` and `tools/update_locks.sh`
     exist, but no lock was generated (no PyPI in the sandbox). Run the script,
     commit the locks, switch the workflows to `--require-hashes`.

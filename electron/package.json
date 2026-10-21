@@ -19,7 +19,8 @@
     "appId": "io.github.rezaxr14.xrayforge",
     "productName": "Xray Forge",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "assets"
     },
     "files": [
       "main.js",
@@ -28,7 +29,8 @@
       "engine-path.js",
       "files.js",
       "renderer/**/*",
-      "package.json"
+      "package.json",
+      "assets/icon.png"
     ],
     "extraResources": [
       {

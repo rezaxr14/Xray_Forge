@@ -78,6 +78,17 @@ are fixed; `tools/check_version.py --package` now reads the version from files.
 * Updating a pin: look up the tag's commit (`git ls-remote --tags <repo> 'refs/tags/vX.Y.Z*'`;
   for an annotated tag use the `^{}` line), replace the SHA and the comment together.
 
+## Icons and legal files
+
+* `electron/assets/icon.png` (512x512) and `icon.ico` (16..256) are drawn by
+  `tools/make_icons.py electron/assets` (needs Pillow; output is committed and a
+  test fails if it goes stale). They live in `assets/`, not `build/`, because
+  `build/` is gitignored. electron-builder reads them via
+  `directories.buildResources`; the window uses the PNG at runtime. Not yet
+  seen in a built installer: nobody has launched one.
+* Release archives and installers ship `LICENSE` and `NOTICE` (Apache-2.0); the
+  desktop job stages them into `electron/legal/` for `extraResources`.
+
 ## Still open
 
 - Windows installers are **unsigned**: SmartScreen will warn. Code signing
@@ -85,7 +96,6 @@ are fixed; `tools/check_version.py --package` now reads the version from files.
 - Linux AppImage: some distributions disable unprivileged user namespaces,
   which Chromium's sandbox needs; the app then needs `--no-sandbox`.
 - macOS is not built (no macOS engine testing).
-- Default Electron icon; add `build/icon.png` (512x512) and `build/icon.ico`.
 - The engine keeps its data in `~/.xray_forge` (accounts, sessions, logs).
   Uninstalling the app does not remove it.
 - The installers have not been launched by a human yet; CI only proves they

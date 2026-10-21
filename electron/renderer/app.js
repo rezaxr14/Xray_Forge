@@ -418,6 +418,19 @@ $('#cv-send').addEventListener('click', () => guarded($('#cv-msg'), async () => 
 // ---------------------------------------------------------------- health
 // Rows are selectable (click = only this one, Ctrl/Cmd-click = toggle). Selection is a
 // Set of config lines so it survives the table being rebuilt while results stream in.
+// Anti-DPI probe options of a panel ("hc" Health tab, "sk" Subscriptions check); only
+// what the user filled in is sent, so the engine's defaults stay in charge otherwise.
+function probeOpts(p) {
+  const o = {};
+  const variants = $(`#${p}-frag`).value.split(/[\s;]+/).filter(Boolean);   // specs contain commas, so split on spaces/semicolons
+  if (variants.length) o.frag_variants = variants;
+  if ($(`#${p}-fake`).value.trim()) o.fake_sni = $(`#${p}-fake`).value.trim();
+  if ($(`#${p}-front`).value.trim()) o.front_host = $(`#${p}-front`).value.trim();
+  if ($(`#${p}-rec`).checked) o.record_frag = true;
+  if ($(`#${p}-pad`).checked) o.pad_hello = true;
+  return o;
+}
+
 function healthRow(r, sel) {
   const cls = [r.passed ? '' : 'bad', sel && sel.has(r.line) ? 'selected' : ''].filter(Boolean).join(' ');
   const tr = h('tr', { class: cls, onclick: (e) => {
@@ -466,7 +479,7 @@ async function runHealth(lines) {
   say($('#hc-status'), 'running…');
   const params = {
     lines, workers: Number($('#hc-workers').value), timeout: Number($('#hc-timeout').value),
-    throughput: $('#hc-throughput').checked,
+    throughput: $('#hc-throughput').checked, ...probeOpts('hc'),
   };
   if ($('#hc-core').value) params.core = $('#hc-core').value;
   try {
@@ -570,7 +583,7 @@ sk.sel.onchange = () => { $('#sk-copy').disabled = sk.sel.size !== 1; };
 const skSetRunning = (on) => { $('#sk-start').disabled = on; $('#sk-cancel').disabled = !on; };
 const skRender = () => $('#sk-table tbody').replaceChildren(...byScore(sk.rows).filter((r) => r.line !== undefined).map((r) => healthRow(r, sk.sel)));
 const skOpts = () => {
-  const o = { workers: Number($('#sk-workers').value), timeout: Number($('#sk-timeout').value), throughput: $('#sk-throughput').checked };
+  const o = { workers: Number($('#sk-workers').value), timeout: Number($('#sk-timeout').value), throughput: $('#sk-throughput').checked, ...probeOpts('sk') };
   if ($('#sk-core').value) o.core = $('#sk-core').value;
   return o;
 };
@@ -1008,6 +1021,7 @@ const PERSIST = [
   'cv-fp', 'cv-cs', 'cv-fm', 'cv-template', 'cv-start', 'cv-ip-on', 'cv-ip', 'cv-port-on', 'cv-port',
   'export-format', 'hc-workers', 'hc-timeout', 'hc-core', 'hc-throughput',
   'sk-workers', 'sk-timeout', 'sk-core', 'sk-throughput', 'sk-n',
+  'hc-frag', 'hc-fake', 'hc-front', 'hc-rec', 'hc-pad', 'sk-frag', 'sk-fake', 'sk-front', 'sk-rec', 'sk-pad',
   'sc-cidrs', 'sc-count', 'sc-port', 'sc-sni', 'sc-frag', 'sc-workers', 'sc-geo', 'sc-dead', 'sc-fmt',
   'sn-snis', 'sn-presets', 'sn-http', 'sn-port', 'sn-frag', 'sn-workers', 'sn-fmt',
   'wp-count', 'wp-format', 'mt-use-ca', 'mt-platform', 'mt-cn', 'mt-permitted',

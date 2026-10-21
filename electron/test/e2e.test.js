@@ -1153,3 +1153,75 @@ test('subscriptions check table: select a row and copy its link', opts, async ()
     assert.equal(await page.evaluate(() => window.__clip[0]), VLESS);
   } finally { await close(); }
 });
+
+// ------------------------------------------------------------ step 5.7 (tester knobs)
+test('health/check: anti-DPI options are sent only when set, and are remembered', opts, async () => {
+  const first = await launch();
+  const { home } = first;
+  const record = (page) => page.evaluate(() => {
+    window.__sent = [];
+    const real = window.forge.call;
+    window.forge.call = (m, p) => { if (m === 'health.run' || m === 'sub.check') window.__sent.push([m, p]); return real(m, p); };
+  });
+  try {
+    const pg = first.page;
+    await ready(pg);
+    await record(pg);
+    await pg.fill('#cfg-input', DEAD);
+    await pg.click('#cfg-parse');
+    await pg.waitForSelector('#cfg-table tbody tr');
+    await pg.click('[data-tab=health]');
+    await pg.fill('#hc-timeout', '1');
+    await pg.uncheck('#hc-throughput');
+    await pg.click('#hc-start');                               // nothing filled in: defaults stay in charge
+    await pg.waitForFunction(() => /^done/.test(document.querySelector('#hc-status').textContent), null, { timeout: 30000 });
+    assert.deepEqual(await pg.evaluate(() => Object.keys(window.__sent[0][1]).sort()), ['lines', 'throughput', 'timeout', 'workers']);
+
+    await pg.click('#hc-adv summary');
+    await pg.fill('#hc-frag', 'off 7,8@1');
+    await pg.fill('#hc-fake', 'www.microsoft.com');
+    await pg.fill('#hc-front', 'front.example');
+    await pg.check('#hc-rec');
+    await pg.check('#hc-pad');
+    await pg.click('#hc-start');
+    await pg.waitForFunction(() => window.__sent.length === 2);
+    const p = await pg.evaluate(() => window.__sent[1][1]);
+    assert.deepEqual(p.frag_variants, ['off', '7,8@1']);
+    assert.equal(p.fake_sni, 'www.microsoft.com');
+    assert.equal(p.front_host, 'front.example');
+    assert.equal(p.record_frag, true);
+    assert.equal(p.pad_hello, true);
+    await pg.waitForFunction(() => /^done/.test(document.querySelector('#hc-status').textContent), null, { timeout: 30000 });
+
+    await pg.fill('#hc-fake', 'bad host');                     // the engine's validation reaches the status line
+    await pg.click('#hc-start');
+    await pg.waitForFunction(() => /plain host name/.test(document.querySelector('#hc-status').textContent));
+    assert.equal(await pg.isDisabled('#hc-start'), false);
+    await pg.fill('#hc-fake', 'www.microsoft.com');
+
+    await pg.click('[data-tab=subs]');
+    await pg.click('#sk-adv summary');
+    await pg.fill('#sk-fake', 'f.example');
+    await pg.check('#sk-pad');
+    await pg.click('#sk-start');
+    await pg.waitForFunction(() => window.__sent.some(([m]) => m === 'sub.check'));
+    const sk2 = await pg.evaluate(() => window.__sent.find(([m]) => m === 'sub.check')[1]);
+    assert.equal(sk2.fake_sni, 'f.example');
+    assert.equal(sk2.pad_hello, true);
+    assert.equal('record_frag' in sk2, false);
+    for (let i = 0; i < 100; i++) {
+      if ((await first.engine.call('ui.settings_get', {})).settings['sk-fake'] === 'f.example') break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  } finally { await first.close(); }
+
+  const second = await launch({ home });
+  try {
+    await ready(second.page);
+    await second.page.waitForFunction(() => document.querySelector('#hc-fake').value === 'www.microsoft.com');
+    assert.equal(await second.page.inputValue('#hc-frag'), 'off 7,8@1');
+    assert.equal(await second.page.isChecked('#hc-rec'), true);
+    assert.equal(await second.page.inputValue('#sk-fake'), 'f.example');
+    assert.equal(await second.page.isChecked('#sk-pad'), true);
+  } finally { await second.close(); }
+});

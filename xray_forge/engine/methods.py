@@ -375,8 +375,39 @@ def build(emit, sources: SourceManager | None = None
             if core != "auto" and core not in have:
                 raise invalid_params(f"{core} not found; set its path in the Cores tab")
 
+    def _hostname_opt(v: Any, what: str) -> str | None:
+        """A DNS name for the fake SNI / fronting Host header (or empty/None)."""
+        if v is None or v == "":
+            return None
+        if not isinstance(v, str) or len(v) > 253 or any(c.isspace() for c in v) \
+                or "/" in v or ":" in v:
+            raise invalid_params(f"{what} must be a plain host name")
+        return v.strip().lower().rstrip(".") or None
+
+    def _flag(v: Any, what: str) -> bool:
+        if not isinstance(v, bool):
+            raise invalid_params(f"{what} must be true or false")
+        return v
+
+    def _health_kwargs(fake_sni: Any, front_host: Any, record_frag: Any,
+                       pad_hello: Any, frag_variants: Any) -> dict:
+        """Validate the anti-DPI options shared by health.run and sub.check."""
+        kw: dict = {}
+        opts = hc.TlsOptions(_hostname_opt(fake_sni, "fake_sni"),
+                             _flag(record_frag, "record_frag"), _flag(pad_hello, "pad_hello"),
+                             _hostname_opt(front_host, "front_host"))
+        if opts.active():
+            kw["tls_opts"] = opts
+        if frag_variants is not None:
+            if (not isinstance(frag_variants, list) or not 1 <= len(frag_variants) <= 8
+                    or not all(isinstance(x, str) and len(x) <= 64 for x in frag_variants)):
+                raise invalid_params("frag_variants must be 1..8 short strings, e.g. [\"off\", \"5,94,1@2\"]")
+            kw["frag_variants"] = tuple(x.strip() for x in frag_variants)
+        return kw
+
     def _start_health(ls: list[str], workers: Any, timeout: Any,
-                      throughput: bool, core: str | None) -> str:
+                      throughput: bool, core: str | None,
+                      probe_kw: dict | None = None) -> str:
         """Validate and start a health-check job over ``ls``; the reports are
         kept (last ``KEEP_RUNS`` runs) so best-N / tagged exports can use the
         engine's own scores instead of trusting the client."""
@@ -396,7 +427,8 @@ def build(emit, sources: SourceManager | None = None
 
             def one(line: str) -> None:
                 rep = hc.run_health_check(line, do_throughput=throughput,
-                                          timeout=timeout, stop=ctx.stop, core=core)
+                                          timeout=timeout, stop=ctx.stop, core=core,
+                                          **(probe_kw or {}))
                 row = dataclasses.asdict(rep)
                 row["passed"] = rep.passed()
                 with lock:
@@ -432,14 +464,21 @@ def build(emit, sources: SourceManager | None = None
 
     @d.method("health.run")
     def health_run(lines: list, workers: int = 8, timeout: float = 6.0,
-                   throughput: bool = True, core: str | None = None) -> dict:
+                   throughput: bool = True, core: str | None = None,
+                   fake_sni: Any = None, front_host: Any = None,
+                   record_frag: Any = False, pad_hello: Any = False,
+                   frag_variants: Any = None) -> dict:
         ls = _lines(lines)
         t = _timeout(timeout)
-        return {"job": _start_health(ls, workers, t, bool(throughput), core)}
+        kw = _health_kwargs(fake_sni, front_host, record_frag, pad_hello, frag_variants)
+        return {"job": _start_health(ls, workers, t, bool(throughput), core, kw)}
 
     @d.method("sub.check")
     def sub_check(workers: int = 8, timeout: float = 6.0,
-                  throughput: bool = True, core: str | None = None) -> dict:
+                  throughput: bool = True, core: str | None = None,
+                  fake_sni: Any = None, front_host: Any = None,
+                  record_frag: Any = False, pad_hello: Any = False,
+                  frag_variants: Any = None) -> dict:
         """Health-check the cached configs of every enabled subscription
         source (``sub.fetch`` fills the cache).  Same job as ``health.run``;
         the configs never cross the pipe."""
@@ -448,7 +487,8 @@ def build(emit, sources: SourceManager | None = None
             raise invalid_params("no cached configs: fetch the sources first")
         ls = _lines(lines)
         t = _timeout(timeout)
-        return {"job": _start_health(ls, workers, t, bool(throughput), core),
+        kw = _health_kwargs(fake_sni, front_host, record_frag, pad_hello, frag_variants)
+        return {"job": _start_health(ls, workers, t, bool(throughput), core, kw),
                 "total": len(ls), "removed": removed}
 
     def _run_reports(job: Any) -> list:

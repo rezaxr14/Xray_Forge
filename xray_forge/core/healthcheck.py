@@ -40,6 +40,29 @@ from xray_forge.core.socks import fetch_via_socks
 WEIGHTS = {"dns": 5, "tcp": 10, "tls": 20, "request": 30,
            "download": 20, "upload": 15}
 DEFAULT_FRAG_VARIANTS = ("off", "5,94,1@2", "rand:1-16@2")
+
+
+@dataclass(frozen=True)
+class TlsOptions:
+    """Optional anti-DPI tweaks for the *native* probes (ignored by core-backed
+    checks, where the core builds its own TLS).
+
+    * ``fake_sni``: name sent in the ClientHello instead of the real SNI.
+    * ``record_frag``: split the handshake at TLS-record level too.
+    * ``pad_hello``: pad the ClientHello (changes its size/shape).
+    * ``front_host``: Host header for the WebSocket upgrade (domain fronting).
+    """
+    fake_sni: str | None = None
+    record_frag: bool = False
+    pad_hello: bool = False
+    front_host: str | None = None
+
+    def active(self) -> bool:
+        return bool(self.fake_sni or self.record_frag or self.pad_hello or self.front_host)
+
+    def tls_kwargs(self) -> dict:
+        return {"fake_sni": self.fake_sni or None, "record_frag": self.record_frag,
+                "pad_hello": self.pad_hello}
 DEFAULT_TARGET = ("speed.cloudflare.com", 80, "/__down?bytes=524288")
 DEFAULT_DOWNLOAD_BYTES = 262144
 # Upload throttling kicks in after a burst, so the payload must be big enough
@@ -120,7 +143,7 @@ def probe_tcp(host: str, port: str, timeout: float = 5.0) -> StageResult:
 
 
 def probe_tls(out: Outbound, frag_variants: tuple[str, ...] = DEFAULT_FRAG_VARIANTS,
-              timeout: float = 6.0, stop=None):
+              timeout: float = 6.0, stop=None, opts: TlsOptions | None = None):
     """Try TLS with each fragmentation variant.
 
     Returns ``(StageResult, (TLSClient, socket), technique_tag)``.  The session
@@ -133,7 +156,8 @@ def probe_tls(out: Outbound, frag_variants: tuple[str, ...] = DEFAULT_FRAG_VARIA
         frag = parse_frag(variant)
         try:
             tc, sock, info = tls_connect(out.host, out.port, sni=sni, frag=frag,
-                                         timeout=timeout, stop=stop)
+                                         timeout=timeout, stop=stop,
+                                         **(opts.tls_kwargs() if opts else {}))
         except ProbeError as pe:
             last = StageResult("tls", False, detail=f"{variant}: {pe.detail[:40]}")
             continue
@@ -144,7 +168,8 @@ def probe_tls(out: Outbound, frag_variants: tuple[str, ...] = DEFAULT_FRAG_VARIA
     return last, (None, None), ""
 
 
-def probe_request(out: Outbound, tc, sock, timeout: float = 8.0, stop=None) -> StageResult:
+def probe_request(out: Outbound, tc, sock, timeout: float = 8.0, stop=None,
+                  opts: TlsOptions | None = None) -> StageResult:
     """Real request through the tunnel (native vless/ws only)."""
     if tc is None:
         return StageResult("request", False, detail="no tls session")
@@ -152,7 +177,8 @@ def probe_request(out: Outbound, tc, sock, timeout: float = 8.0, stop=None) -> S
         return StageResult("request", False,
                            detail=f"native tunnel unsupported for {out.scheme}/{out.transport}")
     try:
-        line, ms = ws_upgrade(tc, out.host_header, out.path, timeout, stop)
+        line, ms = ws_upgrade(tc, out.host_header, out.path, timeout, stop,
+                              front_domain=(opts.front_host if opts else None) or None)
     except ProbeError as pe:
         return StageResult("request", False, detail=f"{pe.stage}: {pe.detail[:40]}")
     ok = line.startswith("HTTP/1.1 101") or " 101 " in line
@@ -215,7 +241,7 @@ def _http_ok(status: str) -> bool:
 
 
 def native_tunnel_factory(out: Outbound, variant: str = "", timeout: float = 6.0,
-                          stop=None):
+                          stop=None, opts: TlsOptions | None = None):
     """Return ``make()`` -> (VlessTunnel, socket): a *fresh* TLS + WebSocket +
     VLESS session to the throughput target.
 
@@ -228,9 +254,11 @@ def native_tunnel_factory(out: Outbound, variant: str = "", timeout: float = 6.0
     def make():
         tc, sock, _info = tls_connect(out.host, out.port, sni=out.effective_sni,
                                       frag=parse_frag(variant) if variant else None,
-                                      timeout=timeout, stop=stop)
+                                      timeout=timeout, stop=stop,
+                                      **(opts.tls_kwargs() if opts else {}))
         try:
-            line, _ms = ws_upgrade(tc, out.host_header, out.path, timeout, stop)
+            line, _ms = ws_upgrade(tc, out.host_header, out.path, timeout, stop,
+                                   front_domain=(opts.front_host if opts else None) or None)
             if "101" not in line:
                 raise ProbeError("ws", line[:40] or "no upgrade")
             return VlessTunnel(tc, out.credential, host, port, stop), sock
@@ -343,7 +371,8 @@ def run_health_check(line: str,
                      socks_port: int | None = None,
                      upload_bytes: int = DEFAULT_UPLOAD_BYTES,
                      core: str | None = None,
-                     core_binary: str | None = None) -> HealthReport:
+                     core_binary: str | None = None,
+                     tls_opts: TlsOptions | None = None) -> HealthReport:
     """Run the full staged pipeline for one share-link.
 
     ``core`` ("xray" | "singbox" | "mihomo" | "auto") enables core-backed
@@ -364,8 +393,9 @@ def run_health_check(line: str,
     tcp_ok = rep.stage("tcp") is not None and rep.stage("tcp").ok
     if tcp_ok:
         # short-circuit: no TCP, no point trying TLS/request/throughput
+        extra = {"opts": tls_opts} if tls_opts is not None and tls_opts.active() else {}
         tls_res, (tc, sock), tag = probe_tls(out, frag_variants, timeout=timeout,
-                                             stop=stop)
+                                             stop=stop, **extra)
         if tag:
             rep.techniques.append(tag)
         rep.stages.append(tls_res)
@@ -379,7 +409,7 @@ def run_health_check(line: str,
                     except Exception as e:  # core missing / died on start
                         rep.stages.append(StageResult(
                             "core", False, detail=str(e)[:60] or type(e).__name__))
-                req_res = probe_request(out, tc, sock, timeout=timeout, stop=stop)
+                req_res = probe_request(out, tc, sock, timeout=timeout, stop=stop, **extra)
                 if not req_res.ok and socks is not None:
                     sres = probe_request_socks(socks, timeout=timeout, stop=stop)
                     if sres.ok:
@@ -389,7 +419,7 @@ def run_health_check(line: str,
                     factory = None
                     if out.scheme == "vless" and out.transport == "ws":
                         factory = native_tunnel_factory(
-                            out, tls_res.data.get("variant", ""), timeout, stop)
+                            out, tls_res.data.get("variant", ""), timeout, stop, **extra)
                     # download uses the session the request stage upgraded;
                     # upload gets its own fresh one (one VLESS conn per WS)
                     rep.stages.append(probe_throughput(out, tc, sock, "download",

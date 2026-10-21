@@ -130,13 +130,20 @@ See `docs/engine-api.md`.
     Tk/xvfb/GUI steps in CI. `python -m xray_forge gui` now exits 2 with a pointer
     to the desktop app; no subcommand prints help (it used to open a window).
     Also fixed: `python -m xray_forge` dropped main()'s exit code (always 0).
-    **Deliberately not ported** (Tk-only manual knobs of the legacy tester, which
+    **Not ported at the time** (Tk-only manual knobs of the legacy tester, which
     the staged health pipeline supersedes by trying fragment variants itself):
     free-form fragment string, fake SNI, domain-front header, TLS record
     fragmentation / ClientHello padding toggles, the xray-only "via core" test with
     its fragment switch, and the ★ best marker (health is sorted by score). The
     library code behind them (`core/probe.py`) is still there if they are wanted
     as `health.run` options.
+  - ✅ 5.7 Tester knobs ported after all: `health.run` / `sub.check` take
+    `fake_sni`, `front_host`, `record_frag`, `pad_hello` and `frag_variants`
+    (validated; `core.healthcheck.TlsOptions`), carried through the TLS,
+    request and throughput stages; UI under "Anti-DPI options" on the Health
+    tab and the Subscriptions check panel (remembered between runs). Still not
+    ported: the xray-only "via core" fragment switch (use `--core`) and the ★
+    marker. Native probes only: core-backed checks build their own TLS.
 
 ---
 

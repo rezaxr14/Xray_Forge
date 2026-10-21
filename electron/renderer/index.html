@@ -181,6 +181,17 @@
         <button id="hc-copy" disabled>Copy link</button>
         <button id="hc-keep" disabled>Keep passing → Configs</button>
       </div>
+      <details class="adv" id="hc-adv">
+        <summary>Anti-DPI options (native probes)</summary>
+        <div class="row">
+          <label>Fragment variants <input id="hc-frag" type="text" size="30" list="frag-presets" placeholder="off 5,94,1@2 rand:1-16@2 (default)" aria-label="fragment variants, separated by spaces"></label>
+          <label>Fake SNI <input id="hc-fake" type="text" size="22" placeholder="e.g. www.microsoft.com"></label>
+          <label>Front Host header <input id="hc-front" type="text" size="22" placeholder="WebSocket Host (fronting)"></label>
+          <label><input id="hc-rec" type="checkbox"> TLS record fragmentation</label>
+          <label><input id="hc-pad" type="checkbox"> Pad ClientHello</label>
+        </div>
+        <p class="muted small">Used by the built-in TLS / WebSocket probes; checks run through a proxy core ignore them.</p>
+      </details>
       <div class="row">
         <progress id="hc-progress" value="0" max="1"></progress>
         <span id="hc-status" class="muted" role="status">idle</span>
@@ -221,6 +232,17 @@
           <button id="sk-start" class="primary" title="Health-check the cached configs of every enabled source (fetch first)">Check all sources</button>
           <button id="sk-cancel" disabled>Cancel</button>
         </div>
+      <details class="adv" id="sk-adv">
+        <summary>Anti-DPI options (native probes)</summary>
+        <div class="row">
+          <label>Fragment variants <input id="sk-frag" type="text" size="30" list="frag-presets" placeholder="off 5,94,1@2 rand:1-16@2 (default)" aria-label="fragment variants, separated by spaces"></label>
+          <label>Fake SNI <input id="sk-fake" type="text" size="22" placeholder="e.g. www.microsoft.com"></label>
+          <label>Front Host header <input id="sk-front" type="text" size="22" placeholder="WebSocket Host (fronting)"></label>
+          <label><input id="sk-rec" type="checkbox"> TLS record fragmentation</label>
+          <label><input id="sk-pad" type="checkbox"> Pad ClientHello</label>
+        </div>
+        <p class="muted small">Used by the built-in TLS / WebSocket probes; checks run through a proxy core ignore them.</p>
+      </details>
         <div class="row">
           <progress id="sk-progress" value="0" max="1"></progress>
           <span id="sk-status" class="muted" role="status">idle</span>

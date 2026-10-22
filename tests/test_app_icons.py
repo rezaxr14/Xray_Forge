@@ -56,7 +56,7 @@ def test_the_icons_are_not_gitignored():
 
 
 def test_the_window_uses_the_icon():
-    assert "assets', 'icon.png'" in (ROOT / "electron" / "main.js").read_text(encoding="utf-8")
+    assert "assets', 'icon.png'" in (ROOT / "electron" / "app-shell.js").read_text(encoding="utf-8")
 
 
 def test_the_icon_is_a_real_drawing_not_a_blank_square():

@@ -76,6 +76,19 @@ With the app running (`cd electron && npm start`): open each tab, use the real f
 (import a links file, export results), restart the app and confirm settings persisted, run a small scan
 against a CIDR you own, press Stop mid-scan.
 
+Also check the MASQUE / Psiphon tab: set a binary and (for Psiphon) your own config through the real
+Browse dialogs, run "Test connection", press Cancel during a slow one, restart and confirm the MASQUE
+options came back.
+
+Main-process hardening (only a fake Electron has exercised these so far), in the real app:
+
+- start a second copy: it must exit at once and the first window must come to the front;
+- open DevTools (Ctrl+Shift+I) in the packaged build or `npm start` and run
+  `await navigator.mediaDevices.getUserMedia({audio:true})` and `await Notification.requestPermission()`:
+  both must be denied with no prompt;
+- click any external https link (e.g. one inside a guide text): it opens in the default browser and the
+  app window does not navigate away.
+
 Report: a short list of what worked and what did not, with the exact visible error text.
 
 ## Job 5: Windows test suite and fake-core fixtures

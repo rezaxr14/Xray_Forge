@@ -24,6 +24,7 @@
     },
     "files": [
       "main.js",
+      "app-shell.js",
       "preload.js",
       "engine-client.js",
       "engine-path.js",

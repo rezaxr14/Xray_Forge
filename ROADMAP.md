@@ -78,6 +78,13 @@ Still open from the review (next sprints):
   Verified by Playwright e2e against the real engine with `/bin/sh` fake binaries (POSIX only);
   not exercised: the real fork/client, native dialogs in the packaged app. No token fields exist
   and Psiphon values are never displayed.
+- ✅ **Electron main-process glue tested**: the logic moved from `main.js` into an injectable
+  `electron/app-shell.js` (`main.js` is now thin wiring), tested with a fake `electron`
+  (`test/app-shell.test.js`): window security options, navigation/window-open policy (https only),
+  IPC argument validation, job forwarding, quit/activate order. New hardening: IPC accepted only from
+  our own window's local page, all permission requests denied, webviews blocked, single-instance lock.
+  `test/packaging-files.test.js` fails if a module loaded at startup is missing from `build.files`.
+  Still **not** exercised: real Electron (windows, dialogs, installer), only the fake.
 - ✅ `tools/live_check.py` + `docs/local-agent-runbook.md`: a redacted JSON report
   for env / masque / psiphon / vless throughput / warp-scan, and the jobs a local
   agent runs (locks, live checks, desktop build, shell hand-test). Offline tests

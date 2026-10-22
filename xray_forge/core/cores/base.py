@@ -131,8 +131,12 @@ def _rebind_socks_port(cfg: dict, port: int) -> dict:
 
 def run_socks_probe(core: "CoreAdapter", binary: str, cfg: dict[str, Any],
                     socks_port: int, timeout: float = 8.0,
-                    test_host: str = "ip-api.com") -> dict[str, Any]:
-    """Spawn the core binary with ``cfg`` and fetch geo through its SOCKS port."""
+                    test_host: str = "ip-api.com",
+                    start_timeout: float = 5.0, stop=None) -> dict[str, Any]:
+    """Spawn the core binary with ``cfg`` and fetch geo through its SOCKS port.
+
+    ``start_timeout`` is how long to wait for the local port to open; ``stop``
+    (a ``threading.Event``) cancels the wait and kills the core."""
     from xray_forge.core.socks import fetch_via_socks
 
     res: dict[str, Any] = {"real": None, "cc": "", "exit_ip": "", "status": ""}
@@ -159,8 +163,11 @@ def run_socks_probe(core: "CoreAdapter", binary: str, cfg: dict[str, Any],
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
                                 stderr=err_fh, **kw)
         ok = False
-        end = time.time() + 5
+        end = time.time() + start_timeout
         while time.time() < end:
+            if stop is not None and stop.is_set():
+                res["status"] = "cancelled"
+                return res
             if proc.poll() is not None:
                 break
             try:

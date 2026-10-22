@@ -18,7 +18,13 @@ Only what a source confirmed is marked **confirmed**; everything else is open.
   registers/authenticates against Cloudflare (key/cert enrollment) -- the
   Cloudflare article does not cover it.
 
-Decision: do **not** add a MASQUE protocol handler until a core that supports
+**Update:** the fork's own example (`examples/masque/client.json`) confirms
+the outbound type `masque` and its fields; the fork creates the Cloudflare
+device profile itself when none is given, so Xray Forge does no enrollment.
+Implemented as an opt-in binary slot (`core/masque.py`); still never run
+against the real fork or Cloudflare from this project's tests.
+
+Original decision (kept for context): do **not** add a MASQUE protocol handler until a core that supports
 it is pinned. Plan: (1) read the fork's docs for the config schema, (2) add a
 `CoreSpec` for it that is opt-in and clearly labelled as a fork, (3) gate the
 UI behind core detection, exactly like `supports()` does for XHTTP today.
@@ -31,6 +37,10 @@ UI behind core detection, exactly like `supports()` does for XHTTP today.
   sponsor ID, remote server list URLs) and whether Psiphon Labs permits
   third-party apps to embed it with the public values. These come from
   Psiphon Labs and must not be invented here.
+
+Blockers: the official build and config values come from Psiphon Labs, and
+psiphon-tunnel-core is GPL-3.0, so shipping or embedding it is a licensing
+decision for the project owner (the project itself is Apache-2.0).
 
 Decision: Psiphon is a *managed subprocess exposing a local SOCKS port*, which
 matches the existing core-adapter model. Blocked on obtaining the official

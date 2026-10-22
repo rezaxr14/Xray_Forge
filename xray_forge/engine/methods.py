@@ -547,8 +547,9 @@ def build(emit, sources: SourceManager | None = None
     def job_list() -> list[str]:
         return jobs.active()
 
-    from xray_forge.engine import scan_methods, core_methods, ui_methods
+    from xray_forge.engine import scan_methods, core_methods, ui_methods, masque_methods
     scan_methods.register(d, jobs)
     core_methods.register(d)
+    masque_methods.register(d, jobs)
     ui_methods.register(d)
     return d, jobs

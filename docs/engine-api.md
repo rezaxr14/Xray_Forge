@@ -53,6 +53,10 @@ cancels everything and shuts the engine down.
 | `warp.register` | – | status; talks to Cloudflare, saved 0600 |
 | `warp.config` | `endpoint`, `format` (`xray`/`singbox`/`mihomo`) | outbound JSON snippet (contains the WireGuard key: it is the user's own config) |
 | `warp.scan` | `count`, `workers` | job; items `{endpoint, ms}` |
+| `masque.status` | – | `{path, source, configured, found, version, ok, supported, detail}` for the opt-in `sing-box-extended` binary (a fork; not a registered core). `supported` comes from the binary's own `check` on a credential-free config; `detail` says what is missing |
+| `masque.set_path` | `path` | status; absolute, executable, must answer `version`; `""` clears. Stored under `core_paths.singbox_extended` |
+| `masque.config` | `options`, `socks_port` (1080), `include_secrets` (false) | `{content, redacted}`: the fork's client config as JSON. `options` keys: `use_http2`, `use_l4_proxy`, `use_ipv6`, `address`, `port`, `server_name`, `insecure`, `fragment`, `record_fragment`, `congestion_controller`, `profile_id`, `auth_token`, `license_key`; unknown keys are rejected. `auth_token`/`license_key` are `***` unless `include_secrets` |
+| `masque.probe` | `options`, `timeout` (8, 0.2..120), `start_timeout` (60, 1..300) | job; item and result `{real, cc, exit_ip, status}`. Refused (-32602) when no binary is set; cancelling kills the core. The first run can be slow because the fork may have to create the Cloudflare device profile |
 | `mitm.groups` / `mitm.build` | `groups`, `use_generated_ca` | route families / Xray config JSON |
 | `mitm.generate_ca` / `mitm.ca_paths` | `cn`, `permitted_domains` | paths only; key material is never returned |
 | `mitm.guide` | `platform` | setup text |

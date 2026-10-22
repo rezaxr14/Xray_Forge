@@ -52,10 +52,15 @@ Still open from the review (next sprints):
 - ✅ License: Apache-2.0 (relicensed; the sole author agreed). `LICENSE` is the official text,
   `NOTICE` and the package metadata agree (`tests/test_license.py`); release
   archives and installers ship both files.
-- ⬜ SNI-spoofing helper binary (separate process, raw sockets).
-- 🟡 MASQUE and Psiphon spikes: findings in `docs/spikes-masque-psiphon.md`
-  (MASQUE only confirmed in the `sing-box-extended` fork; Psiphon needs the
-  official build/config values). No adapter until a core is pinned.
+- ⛔ SNI-spoofing helper: out of scope for this project's assistant-built work; not built.
+- ✅ MASQUE (opt-in): `core/masque.py`, `masque.*` engine methods and
+  `xray_forge masque config|check|probe`, driving the `sing-box-extended` fork
+  with the schema from its own example. Gated by the binary's `check`; secrets
+  are redacted by default and never taken from argv. Tested with a fake fork
+  executable (config, gating, probe, cancel, redaction); **not** exercised: the
+  real fork, Cloudflare enrollment, a live tunnel. No UI panel yet.
+- 🟡 Psiphon: blocked on the official build and config values from Psiphon
+  Labs, and on a licensing decision (psiphon-tunnel-core is GPL-3.0). No adapter.
 - ✅ Structured logging (`core/log.py`, CLI `-v`, GUI log file); silent
   state-corruption resets now log a warning.
 - ⬜ Pin third-party Actions by commit SHA (needs a maintainer to look up
@@ -235,11 +240,9 @@ from code, never hard-coded.
   `xray_forge mitm --gen-cert --guide`.
 - ✅ **PattN/PattNG editor fields**: `unsafe` fingerprint and
   `cipherSuites` (`cs=`) flow through the model, share links and exports.
-- ⬜ **Non-encrypted VLESS/Trojan "public-address" mode**: verify the
-  exact config + core support in patched Xray-core sources before building.
-- ⬜ **SNI-Spoofing (raw TCP fake packets)**: needs raw sockets/WinDivert +
-  admin rights. Design as a separate helper process the app launches, not
-  in-app code. Read upstream `injecter.py` / `fake_tcp.py` before designing.
+- ⬜ **Non-encrypted VLESS/Trojan "public-address" mode**: blocked until a
+  public specification exists; it is not derived from the GPL sources.
+- ⛔ **SNI-Spoofing (raw TCP fake packets)**: not built here (out of scope).
 
 ## Phase 3 — Subscription pipeline ✅
 
@@ -290,8 +293,8 @@ pass latency checks while being unusable.
   client API, account persistence, endpoint heuristics scan, and outbound
   rendering for Xray / sing-box / Mihomo (incl. `reserved` from client_id).
   `xray_forge warp register|config|scan-endpoints`.
-- ⬜ **MASQUE**: needs a core that actually supports it — verify current
-  sing-box/Xray support before designing anything.
+- ✅ **MASQUE** (opt-in, via the `sing-box-extended` fork): see Phase 4 notes;
+  needs a real-fork live check by the user.
 - ⬜ **Psiphon**: a separate core (subprocess behind `CoreAdapter`), needs
   binary shipping/licensing decisions. Scope last.
 

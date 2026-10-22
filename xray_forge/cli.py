@@ -249,6 +249,34 @@ def cli_warp(action: str, endpoint: str | None, scan_count: int,
         raise SystemExit(f"unknown warp action: {action}")
 
 
+def cli_masque(args) -> int:
+    """MASQUE through the opt-in sing-box-extended fork (secrets are never taken from argv)."""
+    from xray_forge.core import masque
+    try:
+        opts = masque.MasqueOptions(
+            use_http2=args.http2, use_l4_proxy=args.l4_proxy, use_ipv6=args.ipv6,
+            address=args.address or "", port=args.port or 0, server_name=args.server_name or "",
+            profile_id=args.profile_id or "").validate()
+    except ValueError as e:
+        print(f"masque: {e}", file=sys.stderr)
+        return 2
+    if args.action == "config":
+        print(json.dumps(masque.build_client_config(opts, args.socks_port), indent=2))
+        return 0
+    from xray_forge.core.cores import discover
+    binary = args.binary or discover.find_binary("singbox_extended")
+    if not binary:
+        print("sing-box-extended not found: pass --binary or set SINGBOX_EXTENDED_CORE")
+        return 1
+    if args.action == "check":
+        sup = masque.check_support(binary)
+        print("MASQUE supported" if sup["supported"] else f"not supported: {sup['detail']}")
+        return 0 if sup["supported"] else 1
+    r = masque.probe(binary, opts, timeout=args.timeout, start_timeout=args.start_timeout)
+    print(f"{r['status']}  real={r['real']}  exit={r['exit_ip'] or '-'}  cc={r['cc'] or '-'}")
+    return 0 if r["real"] is not None and r["status"] == "core ok" else 1
+
+
 def cli_warp_config(acct=None, endpoint: str | None = None) -> str:
     from xray_forge.core import warp
     from xray_forge.core.cores import get_core
@@ -410,6 +438,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_warp.add_argument("--count", type=int, default=60)
     p_warp.add_argument("--workers", type=int, default=20)
 
+    p_masque = sub.add_parser("masque", help="MASQUE via the opt-in sing-box-extended fork")
+    p_masque.add_argument("action", choices=["config", "check", "probe"])
+    p_masque.add_argument("--binary", default=None, help="path to sing-box-extended")
+    p_masque.add_argument("--http2", action="store_true", help="HTTP/2 instead of HTTP/3")
+    p_masque.add_argument("--l4-proxy", action="store_true", help="TCP-only CONNECT proxy mode")
+    p_masque.add_argument("--ipv6", action="store_true")
+    p_masque.add_argument("--address", default=None)
+    p_masque.add_argument("--port", type=int, default=None)
+    p_masque.add_argument("--server-name", default=None)
+    p_masque.add_argument("--profile-id", default=None)
+    p_masque.add_argument("--socks-port", type=int, default=1080)
+    p_masque.add_argument("--timeout", type=float, default=8.0)
+    p_masque.add_argument("--start-timeout", type=float, default=60.0)
+
     p_subs = sub.add_parser("subs", help="subscription sources + health checks")
     p_subs.add_argument("action",
                         choices=["add", "list", "remove", "fetch", "check"])
@@ -476,6 +518,8 @@ def main(argv: list[str] | None = None) -> int:
         cli_mitm(args.out, args.cn, args.gen_cert, args.groups, args.guide)
     elif cmd == "warp":
         cli_warp(args.action, args.endpoint, args.count, args.workers)
+    elif cmd == "masque":
+        return cli_masque(args)
     elif cmd == "subs":
         cli_subs(args.action, args.url, args.name, args.top_n, args.outfile,
                  args.workers, args.timeout, args.no_throughput, args.core)

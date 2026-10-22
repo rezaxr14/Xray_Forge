@@ -23,6 +23,10 @@ SPECS: dict[str, dict] = {
              "version_args": ("version",)},
     "singbox": {"env": "SINGBOX_CORE", "names": ("sing-box", "sing_box"),
                 "v2rayn": ("sing_box", "sing-box"), "version_args": ("version",)},
+    # the opt-in sing-box fork with a MASQUE outbound; not a registered core
+    # (it has no share-link protocols), only a binary slot used by core/masque.py
+    "singbox_extended": {"env": "SINGBOX_EXTENDED_CORE", "names": ("sing-box-extended",),
+                         "v2rayn": (), "version_args": ("version",)},
     "mihomo": {"env": "MIHOMO_CORE", "names": ("mihomo", "clash-meta", "verge-mihomo"),
                "v2rayn": ("mihomo", "clash_meta"), "version_args": ("-v",)},
 }

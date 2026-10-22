@@ -42,6 +42,13 @@ Blockers: the official build and config values come from Psiphon Labs, and
 psiphon-tunnel-core is GPL-3.0, so shipping or embedding it is a licensing
 decision for the project owner (the project itself is Apache-2.0).
 
+**Update:** implemented as bring-your-own (`core/psiphon.py`): the user supplies
+the `ConsoleClient` binary and their own config; we rewrite local ports and the
+data directory on a private copy. Documented upstream usage is
+`ConsoleClient -config <file>` with `LocalSocksProxyPort`/`LocalHttpProxyPort`;
+`DataRootDirectory` and `-version` are assumed from newer releases and are unverified
+(the version command is informational only). Needs a real-client check.
+
 Decision: Psiphon is a *managed subprocess exposing a local SOCKS port*, which
 matches the existing core-adapter model. Blocked on obtaining the official
 build and config values; track as a spike, not a feature.

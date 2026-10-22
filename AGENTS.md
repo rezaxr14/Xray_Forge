@@ -135,6 +135,10 @@ tests/                   pytest suite (offline; see Testing rules)
   relicensing the whole project. Xray-core is Apache-2.0 and fine to *read*
   for API shape. Keep `LICENSE` byte-identical to the official text (a test
   checks its hash) and keep `NOTICE` shipped with every release archive.
+- External cores and tools (xray, sing-box, mihomo, sing-box-extended, Psiphon's
+  `ConsoleClient`) are **separate programs the user supplies**; we spawn them and
+  never link or copy their code, so their licences (some GPL-3.0) do not apply to
+  this repo. Bundling one in an installer is a separate licensing decision.
 - Techniques are re-implemented from public documentation. When implementing
   from an upstream repo, write original code and note the documented source
   in the docstring (see `core/domainfront.py` for the pattern).

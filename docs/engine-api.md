@@ -57,6 +57,10 @@ cancels everything and shuts the engine down.
 | `masque.set_path` | `path` | status; absolute, executable, must answer `version`; `""` clears. Stored under `core_paths.singbox_extended` |
 | `masque.config` | `options`, `socks_port` (1080), `include_secrets` (false) | `{content, redacted}`: the fork's client config as JSON. `options` keys: `use_http2`, `use_l4_proxy`, `use_ipv6`, `address`, `port`, `server_name`, `insecure`, `fragment`, `record_fragment`, `congestion_controller`, `profile_id`, `auth_token`, `license_key`; unknown keys are rejected. `auth_token`/`license_key` are `***` unless `include_secrets` |
 | `masque.probe` | `options`, `timeout` (8, 0.2..120), `start_timeout` (60, 1..300) | job; item and result `{real, cc, exit_ip, status}`. Refused (-32602) when no binary is set; cancelling kills the core. The first run can be slow because the fork may have to create the Cloudflare device profile |
+| `psiphon.status` | – | `{path, source, configured, found, version, ok, config_path, config_ok, detail}` for the user's own Psiphon `ConsoleClient` and config file; config values are never returned |
+| `psiphon.set_path` | `path` | status; absolute executable (its version command is informational only); `""` clears. Stored under `core_paths.psiphon` |
+| `psiphon.set_config` | `path` | status; absolute JSON file with `PropagationChannelId` and `SponsorId` (from Psiphon Labs); `""` clears. Stored as `psiphon_config` in `settings.json` |
+| `psiphon.probe` | `timeout` (8, 0.2..120), `start_timeout` (120, 1..600) | job; item and result `{real, cc, exit_ip, status}`. Runs the client on a private rewritten copy of the config (own SOCKS/HTTP ports, temp data directory, removed afterwards); cancelling kills it |
 | `mitm.groups` / `mitm.build` | `groups`, `use_generated_ca` | route families / Xray config JSON |
 | `mitm.generate_ca` / `mitm.ca_paths` | `cn`, `permitted_domains` | paths only; key material is never returned |
 | `mitm.guide` | `platform` | setup text |

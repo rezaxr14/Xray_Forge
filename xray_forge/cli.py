@@ -277,6 +277,31 @@ def cli_masque(args) -> int:
     return 0 if r["real"] is not None and r["status"] == "core ok" else 1
 
 
+def cli_psiphon(args) -> int:
+    """Psiphon via the user's own ConsoleClient binary and config (values are never printed)."""
+    from xray_forge.core import psiphon
+    from xray_forge.core.cores import discover
+    binary = args.binary or discover.find_binary("psiphon")
+    config = args.config or psiphon.configured_config()
+    if not binary:
+        print("Psiphon ConsoleClient not found: pass --binary or set PSIPHON_CORE")
+        return 1
+    if not config:
+        print("no Psiphon config: pass --config (your own file from Psiphon Labs)")
+        return 1
+    try:
+        psiphon.load_config(config)
+    except ValueError as e:
+        print(f"config: {e}")
+        return 1
+    if args.action == "status":
+        print(f"binary {binary}\nconfig ok")
+        return 0
+    r = psiphon.probe(binary, config, timeout=args.timeout, start_timeout=args.start_timeout)
+    print(f"{r['status']}  real={r['real']}  exit={r['exit_ip'] or '-'}  cc={r['cc'] or '-'}")
+    return 0 if r["status"] == "core ok" else 1
+
+
 def cli_warp_config(acct=None, endpoint: str | None = None) -> str:
     from xray_forge.core import warp
     from xray_forge.core.cores import get_core
@@ -452,6 +477,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_masque.add_argument("--timeout", type=float, default=8.0)
     p_masque.add_argument("--start-timeout", type=float, default=60.0)
 
+    p_psi = sub.add_parser("psiphon", help="Psiphon via your own ConsoleClient binary and config")
+    p_psi.add_argument("action", choices=["status", "probe"])
+    p_psi.add_argument("--binary", default=None)
+    p_psi.add_argument("--config", default=None, help="your Psiphon client config (JSON)")
+    p_psi.add_argument("--timeout", type=float, default=8.0)
+    p_psi.add_argument("--start-timeout", type=float, default=120.0)
+
     p_subs = sub.add_parser("subs", help="subscription sources + health checks")
     p_subs.add_argument("action",
                         choices=["add", "list", "remove", "fetch", "check"])
@@ -518,6 +550,8 @@ def main(argv: list[str] | None = None) -> int:
         cli_mitm(args.out, args.cn, args.gen_cert, args.groups, args.guide)
     elif cmd == "warp":
         cli_warp(args.action, args.endpoint, args.count, args.workers)
+    elif cmd == "psiphon":
+        return cli_psiphon(args)
     elif cmd == "masque":
         return cli_masque(args)
     elif cmd == "subs":

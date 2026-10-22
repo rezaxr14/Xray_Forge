@@ -59,8 +59,17 @@ Still open from the review (next sprints):
   are redacted by default and never taken from argv. Tested with a fake fork
   executable (config, gating, probe, cancel, redaction); **not** exercised: the
   real fork, Cloudflare enrollment, a live tunnel. No UI panel yet.
-- 🟡 Psiphon: blocked on the official build and config values from Psiphon
-  Labs, and on a licensing decision (psiphon-tunnel-core is GPL-3.0). No adapter.
+- ✅ Psiphon (bring your own): `core/psiphon.py`, `psiphon.*` engine methods and
+  `xray_forge psiphon status|probe` run the user's `ConsoleClient` and their own
+  Psiphon Labs config as a separate process, on a private rewritten config copy.
+  Nothing from Psiphon is bundled or invented, so the project stays Apache-2.0
+  (GPL-3.0 applies to their binary, not to this code). Tested with a fake client;
+  **not** exercised: the real client or network. Whether to *bundle* the binary
+  is the owner's licensing call (would need GPL source-offer terms for it).
+- ✅ `tools/live_check.py` + `docs/local-agent-runbook.md`: a redacted JSON report
+  for env / masque / psiphon / vless throughput / warp-scan, and the jobs a local
+  agent runs (locks, live checks, desktop build, shell hand-test). Offline tests
+  cover the report shape, redaction and that every runbook command parses.
 - ✅ Structured logging (`core/log.py`, CLI `-v`, GUI log file); silent
   state-corruption resets now log a warning.
 - ⬜ Pin third-party Actions by commit SHA (needs a maintainer to look up
@@ -240,8 +249,10 @@ from code, never hard-coded.
   `xray_forge mitm --gen-cert --guide`.
 - ✅ **PattN/PattNG editor fields**: `unsafe` fingerprint and
   `cipherSuites` (`cs=`) flow through the model, share links and exports.
-- ⬜ **Non-encrypted VLESS/Trojan "public-address" mode**: blocked until a
-  public specification exists; it is not derived from the GPL sources.
+- ⬜ **Non-encrypted VLESS/Trojan "public-address" mode**: needs a written
+  spec or documentation of the exact config and core support. Not started;
+  reading GPL-3.0 upstream sources would require relicensing first (decision
+  for the owner, not needed for anything built so far).
 - ⛔ **SNI-Spoofing (raw TCP fake packets)**: not built here (out of scope).
 
 ## Phase 3 — Subscription pipeline ✅

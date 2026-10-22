@@ -41,6 +41,32 @@ NEEDS_FORK = ("this sing-box build has no MASQUE outbound (masque); "
               "use the sing-box-extended fork")
 
 
+DNS_MODES = ("auto", "system", "doh")
+DOH_SERVERS = ("1.1.1.1", "8.8.8.8")        # IP literals: the resolver must not itself need resolving
+
+
+def system_dns_is_fake() -> bool:
+    """True when the system resolver answers with fake-IP addresses (198.18.0.0/15),
+    as TUN-mode proxies do; a core that resolves that way connects to dead addresses."""
+    import ipaddress
+    import socket
+    net = ipaddress.ip_network("198.18.0.0/15")
+    try:
+        infos = socket.getaddrinfo("cloudflare.com", 443, socket.AF_INET, socket.SOCK_STREAM)
+    except OSError:
+        return False
+    return any(ipaddress.ip_address(i[4][0]) in net for i in infos)
+
+
+def _dns_servers(mode: str) -> list[dict[str, Any]]:
+    if mode == "auto":
+        mode = "doh" if system_dns_is_fake() else "system"
+    if mode == "system":
+        return [{"type": "local", "tag": "default"}]
+    return [{"type": "https", "tag": "default" if i == 0 else f"doh{i}", "server": ip, "server_port": 443}
+            for i, ip in enumerate(DOH_SERVERS)]
+
+
 def _bool(v: Any, what: str) -> bool:
     if not isinstance(v, bool):
         raise ValueError(f"{what} must be true or false")
@@ -65,12 +91,16 @@ class MasqueOptions:
     fragment: bool = False
     record_fragment: bool = False
     congestion_controller: str = "bbr"
+    dns: str = "auto"                   # "system" | "doh" (IP-literal DoH) | "auto" (doh only if the resolver is fake-IP)
+    bind_interface: bool = False        # route.auto_detect_interface; broke HTTP/2 on a TUN machine, so opt-in
     profile_id: str = ""                # an existing device profile; empty = the fork creates one
     auth_token: str = field(default="", repr=False)
     license_key: str = field(default="", repr=False)
 
     def validate(self) -> "MasqueOptions":
-        for name in ("use_http2", "use_l4_proxy", "use_ipv6", "insecure", "fragment", "record_fragment"):
+        if self.dns not in DNS_MODES:
+            raise ValueError("dns must be one of: " + ", ".join(DNS_MODES))
+        for name in ("use_http2", "use_l4_proxy", "use_ipv6", "insecure", "fragment", "record_fragment", "bind_interface"):
             _bool(getattr(self, name), name)
         if isinstance(self.port, bool) or not isinstance(self.port, int) or not 0 <= self.port <= 65535:
             raise ValueError("port must be 0 (default) or 1..65535")
@@ -121,12 +151,15 @@ def build_client_config(opts: MasqueOptions, socks_port: int) -> dict[str, Any]:
         outbound["address"] = opts.address
         if opts.port:
             outbound["port"] = opts.port
+    route: dict[str, Any] = {"final": TAG, "default_domain_resolver": "default"}
+    if opts.bind_interface:
+        route["auto_detect_interface"] = True
     return {
         "log": {"level": "warn"},
-        "dns": {"servers": [{"type": "local", "tag": "default"}]},
+        "dns": {"servers": _dns_servers(opts.dns)},
         "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": socks_port}],
         "outbounds": [{"type": "direct", "tag": "direct"}, outbound],
-        "route": {"final": TAG, "default_domain_resolver": "default", "auto_detect_interface": True},
+        "route": route,
     }
 
 

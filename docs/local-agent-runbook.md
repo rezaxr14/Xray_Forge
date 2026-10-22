@@ -78,6 +78,25 @@ against a CIDR you own, press Stop mid-scan.
 
 Report: a short list of what worked and what did not, with the exact visible error text.
 
+## Job 5: Windows test suite and fake-core fixtures
+
+    python -m pytest -q
+
+Tests that use fake external cores (`tests/test_masque.py`, `test_psiphon.py`, `test_live_check.py`,
+`test_engine_masque.py`, `test_cli_masque.py`) run on Windows through `.cmd` wrappers (`tests/fakebin.py`).
+That path has only been run on Linux so far. Report the full list of failures with their output; do not
+skip or edit tests to get green.
+
+Also run, on the machine you checked MASQUE on:
+
+    python -m xray_forge masque config --dns auto
+    python -m xray_forge masque config --dns doh
+
+and use the printed config with the real `sing-box-extended` (`check`, then `run` and fetch an HTTPS page
+through its SOCKS port with `--bind-interface` absent). Then `python tools/live_check.py masque`. Report whether
+`auto` picked DoH on your fake-IP TUN setup and whether the probe now succeeds with HTTP/2
+(`masque probe --http2`) and without.
+
 ## What to send back
 
 One message containing: Job 0 summary, the lock files, the report JSON files, the build/installer notes,

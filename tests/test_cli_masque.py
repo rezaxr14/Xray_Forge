@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 
 import pytest
 
@@ -11,7 +10,6 @@ from xray_forge.cli import build_parser, main
 from xray_forge.core.cores import discover
 from tests.test_masque import core  # noqa: F401
 
-posix = pytest.mark.skipif(sys.platform.startswith("win"), reason="python-script fake core")
 
 
 @pytest.fixture(autouse=True)
@@ -40,7 +38,6 @@ def test_config_rejects_bad_options(capsys):
     assert "address" in capsys.readouterr().err
 
 
-@posix
 def test_check_reports_support(core, monkeypatch, capsys):
     assert main(["masque", "check", "--binary", core.binary]) == 0
     assert "supported" in capsys.readouterr().out
@@ -54,7 +51,6 @@ def test_check_without_a_binary_says_so(capsys):
     assert "not found" in capsys.readouterr().out
 
 
-@posix
 def test_probe_prints_the_exit_and_sets_the_exit_code(core, monkeypatch, capsys):
     assert main(["masque", "probe", "--binary", core.binary, "--timeout", "3"]) == 0
     out = capsys.readouterr().out

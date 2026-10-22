@@ -66,6 +66,12 @@ Still open from the review (next sprints):
   (GPL-3.0 applies to their binary, not to this code). Tested with a fake client;
   **not** exercised: the real client or network. Whether to *bundle* the binary
   is the owner's licensing call (would need GPL source-offer terms for it).
+- ✅ MASQUE DNS/interface defaults from a real-machine report: on a TUN/fake-IP
+  setup the system resolver hands out 198.18.0.0/15 addresses and the core hangs, while DoH
+  over an IP literal worked. New `dns` option (`auto` = DoH only when the resolver is
+  fake-IP, `system`, `doh`); `route.auto_detect_interface` is now opt-in (`bind_interface`)
+  because it broke HTTP/2 in the agent's runs (small sample: 0/3 vs 3/3). Fake-core test
+  fixtures now work on Windows via `.cmd` wrappers (`tests/fakebin.py`), not yet run on Windows.
 - ✅ `tools/live_check.py` + `docs/local-agent-runbook.md`: a redacted JSON report
   for env / masque / psiphon / vless throughput / warp-scan, and the jobs a local
   agent runs (locks, live checks, desktop build, shell hand-test). Offline tests

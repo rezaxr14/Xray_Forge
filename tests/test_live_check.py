@@ -9,11 +9,11 @@ import sys
 
 import pytest
 
+from tests.fakebin import WATCHDOG, make_exe
 from tests.test_psiphon import FAKE as PSI_FAKE, USER_CFG  # noqa: F401
 from tests.test_masque import core as masque_core  # noqa: F401
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-posix = pytest.mark.skipif(sys.platform.startswith("win"), reason="python-script fake core")
 SECRET_LINK = ("vless://13b8ac3f-e8de-4b2d-82db-e9130d288a54@127.0.0.1:1"
                "?security=tls&sni=secret-sni.example.com&type=ws&host=secret-host.example.com&path=%2Fsecret#nm")
 
@@ -52,16 +52,13 @@ def test_environment_only_report_is_well_formed(live, tmp_path):
     assert rep["checks"] == []
 
 
-@posix
 def test_masque_and_psiphon_checks_pass_with_fake_binaries(live, tmp_path, masque_core, monkeypatch):
-    p = tmp_path / "ConsoleClient"
-    p.write_text(PSI_FAKE.format(python=sys.executable))
-    p.chmod(0o755)
+    p = make_exe(tmp_path, "ConsoleClient", PSI_FAKE.format(python=sys.executable, watchdog=WATCHDOG))
     cfg = tmp_path / "client.config"
     cfg.write_text(json.dumps(USER_CFG))
     monkeypatch.setenv("FAKE_LOG", str(tmp_path / "x.log"))
     code, rep = run(live, tmp_path, "masque", "psiphon", "--masque-binary", masque_core.binary,
-                    "--psiphon-binary", str(p), "--psiphon-config", str(cfg), "--timeout", "3", "--start-timeout", "10")
+                    "--psiphon-binary", p, "--psiphon-config", str(cfg), "--timeout", "3", "--start-timeout", "10")
     by = {c["name"]: c for c in rep["checks"]}
     assert code == 0 and by["masque"]["ok"] and by["psiphon"]["ok"]
     assert by["masque"]["cc"] == "DE" and by["psiphon"]["cc"] == "NL"
@@ -70,7 +67,6 @@ def test_masque_and_psiphon_checks_pass_with_fake_binaries(live, tmp_path, masqu
         assert secret not in text
 
 
-@posix
 def test_failures_are_reported_with_a_nonzero_exit_code(live, tmp_path, masque_core, monkeypatch):
     monkeypatch.setenv("FAKE_MODE", "unsupported")
     code, rep = run(live, tmp_path, "masque", "--masque-binary", masque_core.binary)

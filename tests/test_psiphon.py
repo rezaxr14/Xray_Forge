@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import stat
 import sys
 import threading
 import time
@@ -19,9 +18,9 @@ import pytest
 from xray_forge.cli import main
 from xray_forge.core import psiphon
 from xray_forge.core.cores import discover
+from tests.fakebin import WATCHDOG, make_exe
 from tests.test_engine import Client
 
-posix = pytest.mark.skipif(sys.platform.startswith("win"), reason="python-script fake core")
 
 FAKE = '''\
 #!{python}
@@ -29,6 +28,7 @@ import json, os, socket, stat, sys, threading, time
 if sys.argv[1:] == ["-version"]:
     print("psiphon fake 2.0.0"); sys.exit(0)
 assert sys.argv[1] == "-config"
+{watchdog}
 cfg_path = sys.argv[2]
 cfg = json.load(open(cfg_path))
 log = os.environ.get("FAKE_LOG")
@@ -76,16 +76,14 @@ def clean_env(monkeypatch, tmp_path):
 
 @pytest.fixture
 def fake(tmp_path, monkeypatch):
-    path = tmp_path / "ConsoleClient"
-    path.write_text(FAKE.format(python=sys.executable))
-    path.chmod(0o755)
+    path = make_exe(tmp_path, "ConsoleClient", FAKE.format(python=sys.executable, watchdog=WATCHDOG))
     cfg = tmp_path / "client.config"
     cfg.write_text(json.dumps(USER_CFG))
     log = tmp_path / "calls.jsonl"
     monkeypatch.setenv("FAKE_LOG", str(log))
 
     class F:
-        binary, config = str(path), str(cfg)
+        binary, config = path, str(cfg)
 
         @staticmethod
         def calls():
@@ -129,24 +127,21 @@ def test_run_config_rebinds_ports_and_isolates_the_data_directory():
 
 
 # --------------------------------------------------------------------- probe
-@posix
 def test_probe_runs_the_binary_on_a_rewritten_private_copy(fake):
     r = psiphon.probe(fake.binary, fake.config, timeout=3.0, start_timeout=10.0)
     assert r["status"] == "core ok" and r["cc"] == "NL" and r["exit_ip"] == "198.51.100.7"
     call = fake.calls()[0]
-    assert call["mode_bits"] == "0o600"
+    assert os.name == "nt" or call["mode_bits"] == "0o600"
     assert call["cfg"]["LocalSocksProxyPort"] not in (1080, 0) and call["cfg"]["SponsorId"] == "SPON-USER"
     assert os.path.isdir(call["cfg"]["DataRootDirectory"]) is False       # cleaned up afterwards
 
 
-@posix
 def test_probe_reports_a_crash(fake, monkeypatch):
     monkeypatch.setenv("FAKE_MODE", "crash")
     r = psiphon.probe(fake.binary, fake.config, timeout=3.0, start_timeout=10.0)
     assert r["real"] is None and "core exited" in r["status"]
 
 
-@posix
 def test_probe_can_be_cancelled_while_connecting(fake, monkeypatch):
     monkeypatch.setenv("FAKE_DELAY", "30")
     stop = threading.Event()
@@ -165,7 +160,6 @@ def test_probe_with_a_bad_config_never_starts_the_binary(fake, tmp_path):
 
 
 # -------------------------------------------------------------------- engine
-@posix
 def test_engine_status_set_paths_and_probe(fake):
     c = Client()
     assert "psiphon.status" in c.result("engine.info")["methods"]
@@ -181,7 +175,7 @@ def test_engine_status_set_paths_and_probe(fake):
     assert done["result"]["status"] == "core ok" and done["result"]["cc"] == "NL"
 
 
-@posix
+@pytest.mark.skipif(os.name == "nt", reason="uses a /bin/sh script")
 def test_engine_set_path_does_not_require_a_version_command(tmp_path):
     odd = tmp_path / "odd"
     odd.write_text("#!/bin/sh\nexit 3\n")
@@ -190,7 +184,6 @@ def test_engine_set_path_does_not_require_a_version_command(tmp_path):
     assert s["found"] is True and s["ok"] is False
 
 
-@posix
 def test_engine_validation(fake, tmp_path):
     c = Client()
     for method, params in [("psiphon.set_path", {"path": "rel"}), ("psiphon.set_path", {"path": 5}),
@@ -213,7 +206,6 @@ def test_engine_validation(fake, tmp_path):
     assert c.result("psiphon.set_config", path="")["config_ok"] is False     # clears
 
 
-@posix
 def test_engine_cancel_kills_the_client(fake, monkeypatch):
     monkeypatch.setenv("FAKE_DELAY", "30")
     c = Client()
@@ -227,7 +219,6 @@ def test_engine_cancel_kills_the_client(fake, monkeypatch):
 
 
 # ----------------------------------------------------------------------- cli
-@posix
 def test_cli_status_and_probe(fake, capsys, monkeypatch):
     assert main(["psiphon", "status", "--binary", fake.binary, "--config", fake.config]) == 0
     assert "config ok" in capsys.readouterr().out

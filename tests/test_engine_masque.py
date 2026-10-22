@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import json
-import sys
 
 import pytest
 
-from xray_forge.core import masque
 from xray_forge.core.cores import discover
 from tests.test_engine import Client
 from tests.test_masque import core  # noqa: F401  (fixture: fake sing-box-extended executable)
 
-posix = pytest.mark.skipif(sys.platform.startswith("win"), reason="python-script fake core")
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +38,6 @@ def test_status_without_a_binary():
     assert r["found"] is False and r["supported"] is False and "not found" in r["detail"]
 
 
-@posix
 def test_set_path_persists_and_status_checks_masque_support(core):
     c = Client()
     r = c.result("masque.set_path", path=core.binary)
@@ -54,7 +50,6 @@ def test_set_path_persists_and_status_checks_masque_support(core):
     assert cleared["found"] is False
 
 
-@posix
 def test_status_explains_an_ordinary_sing_box(core, monkeypatch):
     c = Client()
     c.result("masque.set_path", path=core.binary)
@@ -63,7 +58,6 @@ def test_status_explains_an_ordinary_sing_box(core, monkeypatch):
     assert s["found"] and s["supported"] is False and "sing-box-extended" in s["detail"]
 
 
-@posix
 def test_set_path_rejects_bad_input(tmp_path):
     c = Client()
     plain = tmp_path / "plain"
@@ -91,7 +85,6 @@ def test_config_validates(params):
     assert Client().call("masque.config", **params)["error"]["code"] == -32602, params
 
 
-@posix
 def test_probe_job_reports_the_exit(core):
     c = Client()
     c.result("masque.set_path", path=core.binary)
@@ -103,7 +96,6 @@ def test_probe_job_reports_the_exit(core):
     assert next(o for o in run["cfg"]["outbounds"] if o["type"] == "masque")["use_l4_proxy"] is True
 
 
-@posix
 def test_probe_job_with_an_ordinary_sing_box_says_what_is_needed(core, monkeypatch):
     c = Client()
     c.result("masque.set_path", path=core.binary)
@@ -112,7 +104,6 @@ def test_probe_job_with_an_ordinary_sing_box_says_what_is_needed(core, monkeypat
     assert done["result"]["real"] is None and "sing-box-extended" in done["result"]["status"]
 
 
-@posix
 def test_cancelling_a_probe_stops_the_core(core, monkeypatch):
     import time
     monkeypatch.setenv("FAKE_DELAY", "30")
@@ -134,7 +125,6 @@ def test_probe_without_a_binary_fails_fast_with_advice():
     {"timeout": 0}, {"timeout": 500}, {"timeout": "5"}, {"timeout": True},
     {"start_timeout": 0}, {"start_timeout": 301}, {"start_timeout": "x"}, {"options": {"auth_token": "a\nb"}},
 ])
-@posix
 def test_probe_validates_before_starting(params, core):
     c = Client()
     c.result("masque.set_path", path=core.binary)
@@ -142,7 +132,6 @@ def test_probe_validates_before_starting(params, core):
     assert not c.jobs.active()
 
 
-@posix
 def test_set_path_rejects_a_relative_path_even_when_the_file_exists(core, tmp_path):
     import os
     import shutil

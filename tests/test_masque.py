@@ -10,14 +10,13 @@ from __future__ import annotations
 
 import json
 import os
-import stat
 import sys
-import textwrap
 
 import pytest
 
 from xray_forge.core import masque
 from xray_forge.core.cores import base as cores_base
+from tests.fakebin import WATCHDOG, make_exe
 
 
 # ------------------------------------------------------------------ fake core
@@ -27,6 +26,7 @@ import json, os, socket, stat, sys, threading, time
 cmd, cfg_path = sys.argv[1], sys.argv[3] if len(sys.argv) > 3 else ""
 if cmd == "version":
     print("sing-box version 1.12.0-extended"); sys.exit(0)
+{watchdog}
 mode = os.environ.get("FAKE_MODE", "ok")
 cfg = json.load(open(cfg_path))
 log = os.environ.get("FAKE_LOG")
@@ -70,16 +70,14 @@ if cmd == "run":
 
 @pytest.fixture
 def core(tmp_path, monkeypatch):
-    path = tmp_path / "sing-box-fake"
-    path.write_text(FAKE_CORE.format(python=sys.executable))
-    path.chmod(0o755)
+    path = make_exe(tmp_path, "sing-box-fake", FAKE_CORE.format(python=sys.executable, watchdog=WATCHDOG))
     log = tmp_path / "calls.jsonl"
     monkeypatch.setenv("FAKE_LOG", str(log))
     monkeypatch.delenv("FAKE_MODE", raising=False)
     monkeypatch.delenv("FAKE_DELAY", raising=False)
 
     class C:
-        binary = str(path)
+        binary = path
 
         @staticmethod
         def calls():
@@ -88,6 +86,15 @@ def core(tmp_path, monkeypatch):
 
 
 # ------------------------------------------------------------------- config
+REAL_DETECT = masque.system_dns_is_fake          # the autouse fixture below replaces the module attribute
+
+
+@pytest.fixture(autouse=True)
+def real_dns(monkeypatch):
+    """Config tests must not depend on the machine's resolver."""
+    monkeypatch.setattr(masque, "system_dns_is_fake", lambda: False)
+
+
 def test_default_config_matches_the_documented_example_shape():
     cfg = masque.build_client_config(masque.MasqueOptions(), 7897)
     ob = next(o for o in cfg["outbounds"] if o["type"] == "masque")
@@ -98,8 +105,9 @@ def test_default_config_matches_the_documented_example_shape():
     assert {"type": "direct", "tag": "direct"} in cfg["outbounds"]
     inb = cfg["inbounds"][0]
     assert inb["type"] == "mixed" and inb["listen"] == "127.0.0.1" and inb["listen_port"] == 7897
-    assert cfg["dns"]["servers"][0]["type"] == "local"
+    assert cfg["dns"]["servers"][0] == {"type": "local", "tag": "default"}     # plain system DNS when it is trustworthy
     assert cfg["route"]["default_domain_resolver"] == "default"
+    assert "auto_detect_interface" not in cfg["route"]
     json.dumps(cfg)                                          # plain JSON (the example's comments are not copied)
 
 
@@ -190,7 +198,7 @@ def test_check_support_missing_binary(tmp_path):
 def test_check_support_uses_no_secrets_and_a_private_temp_file(core):
     masque.check_support(core.binary)
     call = core.calls()[0]
-    assert call["mode_bits"] == "0o600"
+    assert os.name == "nt" or call["mode_bits"] == "0o600"
     ob = next(o for o in call["cfg"]["outbounds"] if o["type"] == "masque")
     assert ob["profile"]["auth_token"] == "" and ob["profile"]["license_key"] == ""
 
@@ -200,7 +208,7 @@ def test_probe_reaches_the_internet_through_the_fake_core(core):
     r = masque.probe(core.binary, masque.MasqueOptions(), timeout=5.0)
     assert r["status"] == "core ok" and r["cc"] == "DE" and r["exit_ip"] == "203.0.113.9" and r["real"] is not None
     run = [c for c in core.calls() if c["cmd"] == "run"][0]
-    assert run["mode_bits"] == "0o600"                       # the config may hold the profile token
+    assert os.name == "nt" or run["mode_bits"] == "0o600"                       # the config may hold the profile token
 
 
 def test_probe_reports_a_core_that_dies_on_start(core, monkeypatch):
@@ -243,3 +251,60 @@ def test_probe_can_be_cancelled_while_the_core_is_still_starting(core, monkeypat
     r = masque.probe(core.binary, masque.MasqueOptions(), timeout=3.0, start_timeout=60.0, stop=stop)
     assert time.monotonic() - t0 < 10
     assert r["real"] is None and "cancel" in r["status"]
+
+
+# ------------------------------------------------- DNS and interface binding
+def _dns(cfg):
+    return cfg["dns"]["servers"]
+
+
+def test_doh_mode_uses_ip_literal_servers_so_it_never_needs_resolution():
+    cfg = masque.build_client_config(masque.MasqueOptions(dns="doh"), 1080)
+    servers = _dns(cfg)
+    assert [s["server"] for s in servers] == ["1.1.1.1", "8.8.8.8"]
+    assert all(s["type"] == "https" and s["server_port"] == 443 for s in servers)
+    assert servers[0]["tag"] == "default" and len({s["tag"] for s in servers}) == 2
+    assert not any("domain_resolver" in s for s in servers)             # a self-referencing resolver broke it
+    assert cfg["route"]["default_domain_resolver"] == "default"
+
+
+def test_system_mode_stays_local_even_when_the_resolver_is_fake(monkeypatch):
+    monkeypatch.setattr(masque, "system_dns_is_fake", lambda: True)
+    assert _dns(masque.build_client_config(masque.MasqueOptions(dns="system"), 1080)) == [{"type": "local", "tag": "default"}]
+
+
+def test_auto_mode_switches_to_doh_only_when_the_system_resolver_is_fake(monkeypatch):
+    monkeypatch.setattr(masque, "system_dns_is_fake", lambda: True)
+    assert _dns(masque.build_client_config(masque.MasqueOptions(), 1080))[0]["type"] == "https"
+    monkeypatch.setattr(masque, "system_dns_is_fake", lambda: False)
+    assert _dns(masque.build_client_config(masque.MasqueOptions(), 1080))[0]["type"] == "local"
+
+
+@pytest.mark.parametrize("answers,expected", [
+    (["198.18.0.7"], True), (["198.19.255.255"], True), (["203.0.113.9", "198.18.1.1"], True),
+    (["198.17.255.255"], False), (["198.20.0.0"], False), (["104.16.0.1"], False), (["2606:4700::1"], False), ([], False)])
+def test_fake_ip_detection(monkeypatch, answers, expected):
+    import socket
+    fam = lambda a: socket.AF_INET6 if ":" in a else socket.AF_INET
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(fam(x), 1, 6, "", (x, 0)) for x in answers])
+    assert REAL_DETECT() is expected
+
+
+def test_fake_ip_detection_survives_a_resolver_failure(monkeypatch):
+    import socket
+
+    def boom(*a, **k):
+        raise socket.gaierror("no")
+    monkeypatch.setattr(socket, "getaddrinfo", boom)
+    assert REAL_DETECT() is False
+
+
+def test_bind_interface_is_opt_in():
+    on = masque.build_client_config(masque.MasqueOptions(bind_interface=True), 1080)
+    assert on["route"]["auto_detect_interface"] is True
+
+
+@pytest.mark.parametrize("bad", [{"dns": "udp"}, {"dns": 1}, {"dns": None}, {"bind_interface": "yes"}, {"bind_interface": 1}])
+def test_new_options_are_validated(bad):
+    with pytest.raises(ValueError):
+        masque.MasqueOptions.from_params(bad)

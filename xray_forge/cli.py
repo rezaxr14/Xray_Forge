@@ -256,7 +256,7 @@ def cli_masque(args) -> int:
         opts = masque.MasqueOptions(
             use_http2=args.http2, use_l4_proxy=args.l4_proxy, use_ipv6=args.ipv6,
             address=args.address or "", port=args.port or 0, server_name=args.server_name or "",
-            profile_id=args.profile_id or "").validate()
+            profile_id=args.profile_id or "", dns=args.dns, bind_interface=args.bind_interface).validate()
     except ValueError as e:
         print(f"masque: {e}", file=sys.stderr)
         return 2
@@ -473,6 +473,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_masque.add_argument("--port", type=int, default=None)
     p_masque.add_argument("--server-name", default=None)
     p_masque.add_argument("--profile-id", default=None)
+    p_masque.add_argument("--dns", choices=["auto", "system", "doh"], default="auto",
+                          help="auto = DoH only when the system resolver returns fake-IP (TUN) answers")
+    p_masque.add_argument("--bind-interface", action="store_true", help="route.auto_detect_interface (off by default)")
     p_masque.add_argument("--socks-port", type=int, default=1080)
     p_masque.add_argument("--timeout", type=float, default=8.0)
     p_masque.add_argument("--start-timeout", type=float, default=60.0)

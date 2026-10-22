@@ -58,7 +58,7 @@ Still open from the review (next sprints):
   with the schema from its own example. Gated by the binary's `check`; secrets
   are redacted by default and never taken from argv. Tested with a fake fork
   executable (config, gating, probe, cancel, redaction); **not** exercised: the
-  real fork, Cloudflare enrollment, a live tunnel. No UI panel yet.
+  real fork, Cloudflare enrollment, a live tunnel.
 - ✅ Psiphon (bring your own): `core/psiphon.py`, `psiphon.*` engine methods and
   `xray_forge psiphon status|probe` run the user's `ConsoleClient` and their own
   Psiphon Labs config as a separate process, on a private rewritten config copy.
@@ -72,6 +72,12 @@ Still open from the review (next sprints):
   fake-IP, `system`, `doh`); `route.auto_detect_interface` is now opt-in (`bind_interface`)
   because it broke HTTP/2 in the agent's runs (small sample: 0/3 vs 3/3). Fake-core test
   fixtures now work on Windows via `.cmd` wrappers (`tests/fakebin.py`), not yet run on Windows.
+- ✅ **MASQUE / Psiphon tab** in the Electron UI: set/browse/clear the binary (and the Psiphon
+  config), MASQUE options (HTTP/2, TCP-only, IPv6, DNS mode, interface binding, endpoint, SNI,
+  profile id; remembered across restarts), redacted config view, and cancellable connection tests.
+  Verified by Playwright e2e against the real engine with `/bin/sh` fake binaries (POSIX only);
+  not exercised: the real fork/client, native dialogs in the packaged app. No token fields exist
+  and Psiphon values are never displayed.
 - ✅ `tools/live_check.py` + `docs/local-agent-runbook.md`: a redacted JSON report
   for env / masque / psiphon / vless throughput / warp-scan, and the jobs a local
   agent runs (locks, live checks, desktop build, shell hand-test). Offline tests

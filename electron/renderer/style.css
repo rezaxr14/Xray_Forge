@@ -77,3 +77,7 @@ pre.out { margin: 6px 0; padding: 8px 10px; background: var(--panel); border: 1p
 .table-wrap.short { max-height: 22vh; }
 details.adv { margin: 6px 0; }
 details.adv summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+
+.bridges h3 { margin: 16px 0 4px; }
+.bridges > p { margin: 2px 0 8px; }
+.bridges textarea { width: 100%; }

@@ -945,6 +945,110 @@ $('#wp-config').addEventListener('click', () => guarded($('#wp-status'), async (
   $('#wp-out').value = (await call('warp.config', params)).content;
 }));
 
+// ----------------------------------------------------- MASQUE / Psiphon
+// Both run a binary the user supplies; nothing secret is ever put on screen
+// (the engine never returns Psiphon values, and no token field exists for MASQUE).
+const br = { ms: null, ps: null };
+
+const probeText = (r) => (r.real == null ? r.status
+  : `${r.status} · ${fmtMs(r.real)} ms · exit ${r.exit_ip || '-'} (${r.cc || '-'})`);
+
+async function pickInto(input, msg, title) {
+  if (!window.forge.pickPath) { say(msg, 'browsing needs the desktop app', true); return; }
+  const p = await window.forge.pickPath({ title });
+  if (p) { input.value = p; say(msg, 'press Set to use it'); }
+}
+
+async function refreshMasque() {
+  const st = await call('masque.status');
+  say($('#ms-status'), !st.found ? st.detail
+    : `${st.version || 'sing-box-extended'} · ${st.supported ? 'MASQUE supported' : `no MASQUE: ${st.detail}`}`, st.found && !st.supported);
+  if (!$('#ms-path').value) $('#ms-path').value = st.configured || st.path || '';
+}
+async function refreshPsiphon() {
+  const st = await call('psiphon.status');
+  const bin = st.found ? `ConsoleClient ${st.ok ? st.version : 'found'}` : 'ConsoleClient not found';
+  const cfg = st.config_ok ? 'config ok' : (st.config_path ? 'config unusable' : 'no config set');
+  say($('#ps-status'), `${bin} · ${cfg}`, !st.found || !st.config_ok);
+  if (!$('#ps-path').value) $('#ps-path').value = st.configured || st.path || '';
+  if (!$('#ps-cfg').value) $('#ps-cfg').value = st.config_path || '';
+}
+onTab.bridges = async () => {
+  await guarded($('#ms-msg'), refreshMasque);
+  await guarded($('#ps-msg'), refreshPsiphon);
+};
+
+function msOptions() {
+  const o = { use_http2: $('#ms-http2').checked, use_l4_proxy: $('#ms-l4').checked, use_ipv6: $('#ms-ipv6').checked,
+    bind_interface: $('#ms-bind').checked, dns: $('#ms-dns').value };
+  const text = (id, key) => { const v = $(id).value.trim(); if (v) o[key] = v; };
+  text('#ms-address', 'address'); text('#ms-sni', 'server_name'); text('#ms-profile', 'profile_id');
+  if ($('#ms-port').value.trim()) o.port = Number($('#ms-port').value);
+  return o;
+}
+
+function bridgeJob(prefix, key, start) {
+  const btn = $(`#${prefix}-probe`), cancel = $(`#${prefix}-cancel`), msg = $(`#${prefix}-msg`);
+  return guarded(msg, async () => {
+    const r = await start();
+    btn.disabled = true; cancel.disabled = false; br[key] = r.job;
+    say(msg, 'connecting… (the first run can take a minute)');
+    await runJob(null, null, (ev) => {
+      if (ev.type !== 'done' && ev.type !== 'error') return;
+      btn.disabled = false; cancel.disabled = true; br[key] = null;
+      if (ev.type === 'error') say(msg, ev.message, true);
+      else if (ev.cancelled) say(msg, 'cancelled');
+      else say(msg, probeText(ev.result), ev.result.real == null);
+    }, r.job);
+  });
+}
+
+$('#ms-set').addEventListener('click', () => guarded($('#ms-msg'), async () => {
+  await call('masque.set_path', { path: $('#ms-path').value.trim() });
+  say($('#ms-msg'), 'saved');
+  await refreshMasque();
+}));
+$('#ms-clear').addEventListener('click', () => guarded($('#ms-msg'), async () => {
+  await call('masque.set_path', { path: '' });
+  $('#ms-path').value = '';
+  say($('#ms-msg'), 'path cleared');
+  await refreshMasque();
+}));
+$('#ms-browse').addEventListener('click', () => guarded($('#ms-msg'), () => pickInto($('#ms-path'), $('#ms-msg'), 'Select sing-box-extended')));
+$('#ms-config').addEventListener('click', () => guarded($('#ms-msg'), async () => {
+  $('#ms-out').value = (await call('masque.config', { options: msOptions() })).content;
+  say($('#ms-msg'), 'config built (tokens hidden)');
+}));
+$('#ms-probe').addEventListener('click', () => bridgeJob('ms', 'ms', () => call('masque.probe', { options: msOptions() })));
+$('#ms-cancel').addEventListener('click', () => { if (br.ms) call('job.cancel', { job: br.ms }); });
+
+$('#ps-set').addEventListener('click', () => guarded($('#ps-msg'), async () => {
+  await call('psiphon.set_path', { path: $('#ps-path').value.trim() });
+  say($('#ps-msg'), 'saved');
+  await refreshPsiphon();
+}));
+$('#ps-clear').addEventListener('click', () => guarded($('#ps-msg'), async () => {
+  await call('psiphon.set_path', { path: '' });
+  $('#ps-path').value = '';
+  say($('#ps-msg'), 'path cleared');
+  await refreshPsiphon();
+}));
+$('#ps-browse').addEventListener('click', () => guarded($('#ps-msg'), () => pickInto($('#ps-path'), $('#ps-msg'), 'Select Psiphon ConsoleClient')));
+$('#ps-cfg-set').addEventListener('click', () => guarded($('#ps-msg'), async () => {
+  await call('psiphon.set_config', { path: $('#ps-cfg').value.trim() });
+  say($('#ps-msg'), 'saved');
+  await refreshPsiphon();
+}));
+$('#ps-cfg-clear').addEventListener('click', () => guarded($('#ps-msg'), async () => {
+  await call('psiphon.set_config', { path: '' });
+  $('#ps-cfg').value = '';
+  say($('#ps-msg'), 'config cleared');
+  await refreshPsiphon();
+}));
+$('#ps-cfg-browse').addEventListener('click', () => guarded($('#ps-msg'), () => pickInto($('#ps-cfg'), $('#ps-msg'), 'Select your Psiphon config')));
+$('#ps-probe').addEventListener('click', () => bridgeJob('ps', 'ps', () => call('psiphon.probe', {})));
+$('#ps-cancel').addEventListener('click', () => { if (br.ps) call('job.cancel', { job: br.ps }); });
+
 // ----------------------------------------------------------- MITM fronting
 async function loadMitm() {
   const g = await call('mitm.groups');
@@ -1043,6 +1147,7 @@ const PERSIST = [
   'sc-tcp-timeout', 'sc-tls-timeout', 'sc-tcp-retries',
   ...['hc', 'sk'].flatMap((p) => ['dns', 'tcp', 'tls', 'request', 'transfer'].map((s) => `${p}-t-${s}`)),
   'sn-snis', 'sn-presets', 'sn-http', 'sn-port', 'sn-frag', 'sn-workers', 'sn-fmt',
+  'ms-http2', 'ms-l4', 'ms-ipv6', 'ms-bind', 'ms-dns', 'ms-address', 'ms-port', 'ms-sni', 'ms-profile',
   'wp-count', 'wp-format', 'mt-use-ca', 'mt-platform', 'mt-cn', 'mt-permitted',
 ];
 // `ready` is false until the saved values are restored, so the events fired while

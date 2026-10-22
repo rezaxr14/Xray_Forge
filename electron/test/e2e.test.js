@@ -1357,3 +1357,160 @@ test('health/check: per-stage timeouts are sent only for the stages filled in, a
     assert.equal(await second.page.inputValue('#hc-t-dns'), '');
   } finally { await second.close(); }
 });
+
+// ------------------------------------------------------------ MASQUE / Psiphon tab
+// POSIX-only: the "cores" are /bin/sh scripts (the Python tests cover the real launcher logic).
+function fakeBridgeDir(scripts) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-bridge-'));
+  const out = {};
+  for (const [name, body] of Object.entries(scripts)) {
+    out[name] = path.join(dir, name);
+    fs.writeFileSync(out[name], `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  }
+  return { dir, ...out };
+}
+const text = (page, sel) => page.textContent(sel);
+
+test('Bridges tab: MASQUE binary status, option handling and a redacted config', opts, async () => {
+  if (process.platform === 'win32') return;
+  const fake = fakeBridgeDir({ 'sing-box-extended': 'case "$1" in version) echo "sing-box 1.12.0-extended";; check) exit 0;; esac' });
+  const { page, problems, close, dialogs } = await launch();
+  try {
+    await page.click('[data-tab=bridges]');
+    await page.waitForFunction(() => /not found/.test(document.querySelector('#ms-status').textContent));
+
+    await page.fill('#ms-path', path.join(fake.dir, 'nope'));
+    await page.click('#ms-set');
+    await page.waitForFunction(() => /executable/.test(document.querySelector('#ms-msg').textContent));
+    assert.match(await page.getAttribute('#ms-msg', 'class'), /bad-text/);
+
+    dialogs.open.push({ canceled: false, filePaths: [fake['sing-box-extended']] });
+    await page.click('#ms-browse');
+    await page.waitForFunction((p) => document.querySelector('#ms-path').value === p, fake['sing-box-extended']);
+    await page.click('#ms-set');
+    await page.waitForFunction(() => /MASQUE supported/.test(document.querySelector('#ms-status').textContent));
+    assert.match(await text(page, '#ms-status'), /1\.12\.0-extended/);
+
+    await page.check('#ms-http2'); await page.check('#ms-l4');
+    await page.selectOption('#ms-dns', 'doh');
+    await page.fill('#ms-address', '162.159.198.1'); await page.fill('#ms-port', '8443');
+    await page.fill('#ms-profile', 'pid-1');
+    await page.click('#ms-config');
+    await page.waitForFunction(() => document.querySelector('#ms-out').value.includes('masque'));
+    let cfg = JSON.parse(await page.inputValue('#ms-out'));
+    const ob = cfg.outbounds.find((o) => o.type === 'masque');
+    assert.equal(ob.use_http2, true); assert.equal(ob.use_l4_proxy, true);
+    assert.equal(ob.address, '162.159.198.1'); assert.equal(ob.port, 8443); assert.equal(ob.profile.id, 'pid-1');
+    assert.deepEqual(cfg.dns.servers.map((s) => s.server), ['1.1.1.1', '8.8.8.8']);
+    assert.equal(cfg.route.auto_detect_interface, undefined);
+
+    await page.selectOption('#ms-dns', 'system'); await page.check('#ms-bind');
+    await page.click('#ms-config');
+    await page.waitForFunction(() => document.querySelector('#ms-out').value.includes('auto_detect_interface'));
+    cfg = JSON.parse(await page.inputValue('#ms-out'));
+    assert.deepEqual(cfg.dns.servers, [{ type: 'local', tag: 'default' }]);
+
+    const before = await page.inputValue('#ms-out');
+    await page.fill('#ms-address', '');                       // a port without an address is refused by the engine
+    await page.click('#ms-config');
+    await page.waitForFunction(() => /address/.test(document.querySelector('#ms-msg').textContent));
+    assert.equal(await page.inputValue('#ms-out'), before);
+    assert.match(await page.getAttribute('#ms-msg', 'class'), /bad-text/);
+
+    await page.click('#ms-clear');
+    await page.waitForFunction(() => /not found/.test(document.querySelector('#ms-status').textContent));
+    assert.deepEqual(problems, []);
+  } finally { await close(); fs.rmSync(fake.dir, { recursive: true, force: true }); }
+});
+
+test('Bridges tab: MASQUE probe reports a failing core and can be cancelled', opts, async () => {
+  if (process.platform === 'win32') return;
+  const fake = fakeBridgeDir({
+    'sing-box-extended': 'case "$1" in version) echo v;; check) exit 0;; run) echo "FATAL enrollment failed" >&2; exit 1;; esac',
+    'slow-extended': 'case "$1" in version) echo v;; check) exit 0;; run) sleep 30;; esac',
+  });
+  const { page, problems, close, dialogs } = await launch();
+  try {
+    await page.click('[data-tab=bridges]');
+    await page.fill('#ms-path', fake['sing-box-extended']); await page.click('#ms-set');
+    await page.waitForFunction(() => /MASQUE supported/.test(document.querySelector('#ms-status').textContent));
+    assert.equal(await page.isDisabled('#ms-cancel'), true);
+    await page.click('#ms-probe');
+    await page.waitForFunction(() => /core exited/.test(document.querySelector('#ms-msg').textContent), null, { timeout: 30000 });
+    assert.match(await text(page, '#ms-msg'), /enrollment failed/);
+    assert.equal(await page.isDisabled('#ms-probe'), false);
+
+    await page.fill('#ms-path', fake['slow-extended']); await page.click('#ms-set');
+    await page.waitForFunction(() => /slow-extended/.test(document.querySelector('#ms-path').value));
+    await page.click('#ms-probe');
+    await page.waitForFunction(() => !document.querySelector('#ms-cancel').disabled);
+    assert.equal(await page.isDisabled('#ms-probe'), true);
+    await page.click('#ms-cancel');
+    await page.waitForFunction(() => /cancel/.test(document.querySelector('#ms-msg').textContent), null, { timeout: 30000 });
+    assert.equal(await page.isDisabled('#ms-probe'), false);
+    assert.equal(await page.isDisabled('#ms-cancel'), true);
+    assert.deepEqual(problems, []);
+  } finally { await close(); fs.rmSync(fake.dir, { recursive: true, force: true }); }
+});
+
+test('Bridges tab: Psiphon needs your own binary and config and never shows its values', opts, async () => {
+  if (process.platform === 'win32') return;
+  const fake = fakeBridgeDir({ ConsoleClient: 'case "$1" in -version) echo "psiphon 2.0";; -config) echo "no server entries available" >&2; exit 1;; esac' });
+  const cfgFile = path.join(fake.dir, 'client.config');
+  fs.writeFileSync(cfgFile, JSON.stringify({ PropagationChannelId: 'CHAN-SECRET', SponsorId: 'SPON-SECRET' }));
+  const badFile = path.join(fake.dir, 'bad.config'); fs.writeFileSync(badFile, '{}');
+  const { page, problems, close, dialogs } = await launch();
+  try {
+    await page.click('[data-tab=bridges]');
+    await page.waitForFunction(() => /not found/.test(document.querySelector('#ps-status').textContent));
+    await page.click('#ps-probe');                                 // nothing set yet: the engine says what is missing
+    await page.waitForFunction(() => /not found/.test(document.querySelector('#ps-msg').textContent));
+    assert.match(await page.getAttribute('#ps-msg', 'class'), /bad-text/);
+
+    dialogs.open.push({ canceled: false, filePaths: [fake.ConsoleClient] });
+    await page.click('#ps-browse'); await page.click('#ps-set');
+    await page.waitForFunction(() => /psiphon 2\.0/.test(document.querySelector('#ps-status').textContent));
+
+    await page.fill('#ps-cfg', badFile); await page.click('#ps-cfg-set');
+    await page.waitForFunction(() => /PropagationChannelId/.test(document.querySelector('#ps-msg').textContent));
+
+    dialogs.open.push({ canceled: false, filePaths: [cfgFile] });
+    await page.click('#ps-cfg-browse'); await page.click('#ps-cfg-set');
+    await page.waitForFunction(() => /config ok/.test(document.querySelector('#ps-status').textContent));
+    const page_text = await page.evaluate(() => document.body.innerText + [...document.querySelectorAll('input,textarea')].map((e) => e.value).join(' '));
+    assert.doesNotMatch(page_text, /CHAN-SECRET|SPON-SECRET/);
+
+    await page.click('#ps-probe');
+    await page.waitForFunction(() => /core exited/.test(document.querySelector('#ps-msg').textContent), null, { timeout: 30000 });
+    assert.match(await text(page, '#ps-msg'), /no server entries/);
+
+    await page.click('#ps-cfg-clear');
+    await page.waitForFunction(() => !/config ok/.test(document.querySelector('#ps-status').textContent));
+    assert.deepEqual(problems, []);
+  } finally { await close(); fs.rmSync(fake.dir, { recursive: true, force: true }); }
+});
+
+test('Bridges tab: MASQUE options survive a restart', opts, async () => {
+  const first = await launch();
+  const { home } = first;
+  try {
+    await ready(first.page);
+    await first.page.click('[data-tab=bridges]');
+    await first.page.check('#ms-http2'); await first.page.selectOption('#ms-dns', 'doh');
+    await first.page.fill('#ms-sni', 'masque.example.com'); await first.page.fill('#ms-address', '162.159.198.1');
+    for (let i = 0; i < 100; i++) {
+      if ((await first.engine.call('ui.settings_get', {})).settings['ms-sni'] === 'masque.example.com') break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.equal((await first.engine.call('ui.settings_get', {})).settings['ms-dns'], 'doh');
+  } finally { await first.close(); }
+  const second = await launch({ home });
+  try {
+    await ready(second.page);
+    await second.page.waitForFunction(() => document.querySelector('#ms-sni').value === 'masque.example.com');
+    assert.equal(await second.page.isChecked('#ms-http2'), true);
+    assert.equal(await second.page.inputValue('#ms-dns'), 'doh');
+    assert.equal(await second.page.inputValue('#ms-address'), '162.159.198.1');
+    assert.equal(await second.page.isChecked('#ms-l4'), false);
+  } finally { await second.close(); }
+});

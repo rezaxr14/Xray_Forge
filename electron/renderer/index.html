@@ -19,6 +19,7 @@
       <button role="tab" data-tab="scan" aria-selected="false">IP scanner</button>
       <button role="tab" data-tab="sni" aria-selected="false">SNI search</button>
       <button role="tab" data-tab="warp" aria-selected="false">WARP</button>
+      <button role="tab" data-tab="bridges" aria-selected="false">MASQUE / Psiphon</button>
       <button role="tab" data-tab="mitm" aria-selected="false">MITM fronting</button>
       <button role="tab" data-tab="cores" aria-selected="false">Cores</button>
     </nav>
@@ -418,6 +419,70 @@
         <button id="wp-config" class="primary">Generate config</button>
       </div>
       <textarea id="wp-out" rows="10" readonly spellcheck="false" placeholder="Outbound JSON appears here (contains your WireGuard key: treat it as a secret)"></textarea>
+    </section>
+
+    <!-- MASQUE / Psiphon (bring your own binaries) -->
+    <section id="tab-bridges" class="tab bridges" role="tabpanel" hidden>
+      <h3>MASQUE (Cloudflare WARP over HTTP/3 or HTTP/2)</h3>
+      <p class="muted">Needs the <b>sing-box-extended</b> fork (official sing-box has no MASQUE). Xray Forge runs your copy as a separate program.</p>
+      <div class="row">
+        <span id="ms-status" class="muted" role="status">checking…</span>
+      </div>
+      <div class="row">
+        <label>Binary <input id="ms-path" type="text" size="44" placeholder="absolute path to sing-box-extended"></label>
+        <button id="ms-browse">Browse…</button>
+        <button id="ms-set">Set</button>
+        <button id="ms-clear">Clear</button>
+      </div>
+      <div class="row">
+        <label><input id="ms-http2" type="checkbox"> HTTP/2 (TCP) instead of HTTP/3</label>
+        <label><input id="ms-l4" type="checkbox"> TCP-only proxy mode</label>
+        <label><input id="ms-ipv6" type="checkbox"> IPv6</label>
+        <label><input id="ms-bind" type="checkbox"> Bind to the physical interface</label>
+        <label>DNS
+          <select id="ms-dns">
+            <option value="auto">auto (DoH only if the system resolver is fake-IP)</option>
+            <option value="system">system resolver</option>
+            <option value="doh">DoH 1.1.1.1 / 8.8.8.8</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <label>Endpoint address <input id="ms-address" type="text" size="18" placeholder="default"></label>
+        <label>Port <input id="ms-port" type="number" min="1" max="65535" placeholder="default"></label>
+        <label>TLS server name <input id="ms-sni" type="text" size="22" placeholder="default"></label>
+        <label>Existing profile id <input id="ms-profile" type="text" size="22" placeholder="the fork creates one"></label>
+      </div>
+      <div class="row">
+        <button id="ms-config">Show config</button>
+        <button id="ms-probe" class="primary">Test connection</button>
+        <button id="ms-cancel" disabled>Cancel</button>
+        <span id="ms-msg" class="muted" role="status"></span>
+      </div>
+      <textarea id="ms-out" rows="8" readonly spellcheck="false" placeholder="The client config appears here (tokens are never shown)"></textarea>
+
+      <h3>Psiphon (bring your own)</h3>
+      <p class="muted">Xray Forge ships no Psiphon binary or values. Use your own <b>ConsoleClient</b> and the client config you obtained from Psiphon Labs; its contents are never displayed.</p>
+      <div class="row">
+        <span id="ps-status" class="muted" role="status">checking…</span>
+      </div>
+      <div class="row">
+        <label>ConsoleClient <input id="ps-path" type="text" size="44" placeholder="absolute path to the executable"></label>
+        <button id="ps-browse">Browse…</button>
+        <button id="ps-set">Set</button>
+        <button id="ps-clear">Clear</button>
+      </div>
+      <div class="row">
+        <label>Config file <input id="ps-cfg" type="text" size="44" placeholder="absolute path to your client config (JSON)"></label>
+        <button id="ps-cfg-browse">Browse…</button>
+        <button id="ps-cfg-set">Set</button>
+        <button id="ps-cfg-clear">Clear</button>
+      </div>
+      <div class="row">
+        <button id="ps-probe" class="primary">Test connection</button>
+        <button id="ps-cancel" disabled>Cancel</button>
+        <span id="ps-msg" class="muted" role="status"></span>
+      </div>
     </section>
 
     <!-- MITM fronting -->

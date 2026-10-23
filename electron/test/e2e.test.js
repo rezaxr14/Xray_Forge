@@ -1401,7 +1401,7 @@ test('Bridges tab: MASQUE binary status, option handling and a redacted config',
     const ob = cfg.outbounds.find((o) => o.type === 'masque');
     assert.equal(ob.use_http2, true); assert.equal(ob.use_l4_proxy, true);
     assert.equal(ob.address, '162.159.198.1'); assert.equal(ob.port, 8443); assert.equal(ob.profile.id, 'pid-1');
-    assert.deepEqual(cfg.dns.servers.map((s) => s.server), ['1.1.1.1', '8.8.8.8']);
+    assert.deepEqual(cfg.dns.servers.map((s) => s.server), ['8.8.8.8', '1.1.1.1']);
     assert.equal(cfg.route.auto_detect_interface, undefined);
 
     await page.selectOption('#ms-dns', 'system'); await page.check('#ms-bind');
@@ -1512,5 +1512,58 @@ test('Bridges tab: MASQUE options survive a restart', opts, async () => {
     assert.equal(await second.page.inputValue('#ms-dns'), 'doh');
     assert.equal(await second.page.inputValue('#ms-address'), '162.159.198.1');
     assert.equal(await second.page.isChecked('#ms-l4'), false);
+  } finally { await second.close(); }
+});
+
+test('Bridges tab: DoH servers and secret fields (sent, never shown, never saved)', opts, async () => {
+  const first = await launch();
+  const { home } = first;
+  const TOKEN = 'TOKEN-SECRET-123'; const LICENSE = 'LICENSE-SECRET-456';
+  try {
+    const { page } = first;
+    await ready(page);
+    await page.click('[data-tab=bridges]');
+    await page.evaluate(() => {
+      window.__calls = [];
+      const orig = window.forge.call;
+      window.forge.call = (m, p) => { window.__calls.push([m, JSON.parse(JSON.stringify(p || {}))]); return orig(m, p); };
+    });
+    assert.equal(await page.getAttribute('#ms-token', 'type'), 'password');
+    assert.equal(await page.getAttribute('#ms-license', 'type'), 'password');
+    assert.equal(await page.getAttribute('#ms-token', 'autocomplete'), 'off');
+    await page.selectOption('#ms-dns', 'doh');
+    await page.fill('#ms-doh', '9.9.9.9, 149.112.112.112');
+    await page.fill('#ms-token', TOKEN); await page.fill('#ms-license', LICENSE); await page.fill('#ms-profile', 'pid-9');
+    await page.click('#ms-config');
+    await page.waitForFunction(() => document.querySelector('#ms-out').value.includes('masque'));
+    const calls = await page.evaluate(() => window.__calls.filter((c) => c[0] === 'masque.config'));
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0][1].options.doh_servers, ['9.9.9.9', '149.112.112.112']);
+    assert.equal(calls[0][1].options.auth_token, TOKEN); assert.equal(calls[0][1].options.license_key, LICENSE);
+    assert.equal(calls[0][1].include_secrets, undefined);                 // the UI never asks for secrets back
+    const out = await page.inputValue('#ms-out');
+    assert.doesNotMatch(out, /SECRET/);
+    assert.match(out, /"auth_token": "\*\*\*"/);
+    assert.deepEqual(JSON.parse(out).dns.servers.map((s) => s.server), ['9.9.9.9', '149.112.112.112']);
+
+    await page.fill('#ms-doh', 'dns.google');                             // a host name is refused by the engine
+    await page.click('#ms-config');
+    await page.waitForFunction(() => /IP/.test(document.querySelector('#ms-msg').textContent));
+    assert.match(await page.getAttribute('#ms-msg', 'class'), /bad-text/);
+    await page.fill('#ms-doh', '9.9.9.9');
+    for (let i = 0; i < 100; i++) {
+      if ((await first.engine.call('ui.settings_get', {})).settings['ms-doh'] === '9.9.9.9') break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const saved = JSON.stringify((await first.engine.call('ui.settings_get', {})).settings);
+    assert.match(saved, /9\.9\.9\.9/); assert.doesNotMatch(saved, /SECRET/);
+    assert.doesNotMatch(await page.evaluate(() => document.body.innerText), /SECRET/);
+  } finally { await first.close(); }
+  const second = await launch({ home });
+  try {
+    await ready(second.page);
+    await second.page.waitForFunction(() => document.querySelector('#ms-doh').value === '9.9.9.9');
+    assert.equal(await second.page.inputValue('#ms-token'), '');
+    assert.equal(await second.page.inputValue('#ms-license'), '');
   } finally { await second.close(); }
 });

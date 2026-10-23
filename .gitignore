@@ -65,7 +65,6 @@ target/
 venv/
 ENV/
 env/
-.
 .venv-lock/
 .venv/
 

@@ -8,9 +8,10 @@ const readline = require('node:readline');
 
 class EngineClient extends EventEmitter {
   // `command`/`args` come from resolveEngine(); `python` is kept for older callers.
-  constructor({ command, args, python = process.env.XRAY_FORGE_PYTHON || 'python3', cwd, env } = {}) {
+  constructor({ command, args, platform = process.platform, python, cwd, env } = {}) {
     super();
-    this.command = command || python;
+    // On Windows `python3` is usually the Microsoft Store stub, so the default there is `python`.
+    this.command = command || python || process.env.XRAY_FORGE_PYTHON || (platform === 'win32' ? 'python' : 'python3');
     this.args = args || ['-m', 'xray_forge', 'serve'];
     this.cwd = cwd;
     this.env = { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8', ...env };

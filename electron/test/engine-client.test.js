@@ -92,3 +92,20 @@ test('resolveEngine: env override > bundled > python', () => {
   assert.equal(resolveEngine({ repoRoot: root, env: { XRAY_FORGE_PYTHON: 'py' }, platform: 'linux' }).command, 'py');
   assert.equal(resolveEngine({ repoRoot: root, env: {}, platform: 'win32' }).command, 'python');
 });
+
+test('default interpreter: python on Windows (python3 there is the Store stub), python3 elsewhere, env override wins', () => {
+  const saved = process.env.XRAY_FORGE_PYTHON;
+  delete process.env.XRAY_FORGE_PYTHON;
+  try {
+    assert.equal(new EngineClient({ platform: 'win32' }).command, 'python');
+    assert.equal(new EngineClient({ platform: 'linux' }).command, 'python3');
+    assert.equal(new EngineClient({ platform: 'darwin' }).command, 'python3');
+    assert.equal(new EngineClient({ platform: 'win32', command: 'C:\\x\\engine.exe' }).command, 'C:\\x\\engine.exe');
+    assert.equal(new EngineClient({ platform: 'win32', python: 'py' }).command, 'py');
+    process.env.XRAY_FORGE_PYTHON = 'C:\\venv\\python.exe';
+    assert.equal(new EngineClient({ platform: 'win32' }).command, 'C:\\venv\\python.exe');
+    assert.equal(new EngineClient({ platform: 'linux' }).command, 'C:\\venv\\python.exe');
+  } finally {
+    if (saved === undefined) delete process.env.XRAY_FORGE_PYTHON; else process.env.XRAY_FORGE_PYTHON = saved;
+  }
+});

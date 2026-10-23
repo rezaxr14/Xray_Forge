@@ -28,7 +28,7 @@ def test_check_version_accepts_matching_tag():
 def test_check_version_rejects_other_tag():
     cv = _load("check_version")
     errs = cv.check("v9.9.9")
-    assert len(errs) == 2 and all("9.9.9" in e for e in errs)
+    assert len(errs) == len(cv.versions()) == 4 and all("9.9.9" in e for e in errs)
 
 
 def test_check_version_allows_prerelease_suffixes():
@@ -74,3 +74,19 @@ def test_smoke_cli_usage_without_separator():
     r = subprocess.run([sys.executable, str(ROOT / "tools" / "smoke_engine.py")],
                        capture_output=True, text=True)
     assert r.returncode == 2
+
+
+def test_the_desktop_app_version_is_checked_and_in_sync():
+    import json
+    cv = _load("check_version")
+    v = cv.versions()
+    assert {"electron/package.json", "electron/package-lock.json"} <= set(v)
+    assert set(v.values()) == {__version__}
+    pkg = json.loads((ROOT / "electron" / "package.json").read_text(encoding="utf-8"))
+    assert pkg["version"] == __version__
+
+
+def test_a_desktop_version_drift_fails_the_tag_check(tmp_path, monkeypatch):
+    cv = _load("check_version")
+    monkeypatch.setattr(cv, "versions", lambda: {"xray_forge.__version__": "2.1.0", "electron/package.json": "0.1.0"})
+    assert any("electron/package.json" in e for e in cv.check("v2.1.0"))

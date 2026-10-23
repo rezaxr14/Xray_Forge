@@ -23,9 +23,14 @@ TAG_RE = re.compile(r"^v?(\d+\.\d+\.\d+)(-(?:rc|beta|alpha)\.?\d+)?$")
 def versions() -> dict[str, str]:
     init = (ROOT / "xray_forge" / "__init__.py").read_text(encoding="utf-8")
     proj = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    import json
+    pkg = json.loads((ROOT / "electron" / "package.json").read_text(encoding="utf-8"))
+    lock = json.loads((ROOT / "electron" / "package-lock.json").read_text(encoding="utf-8"))
     return {
         "xray_forge.__version__": re.search(r'__version__\s*=\s*"([^"]+)"', init).group(1),
         "pyproject.toml": re.search(r'(?m)^version\s*=\s*"([^"]+)"', proj).group(1),
+        "electron/package.json": pkg["version"],
+        "electron/package-lock.json": lock["version"],
     }
 
 

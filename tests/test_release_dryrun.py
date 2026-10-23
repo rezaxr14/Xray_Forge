@@ -83,6 +83,9 @@ class Runner:
         shutil.copy(ROOT / "tools" / "check_version.py", self.repo / "tools" / "check_version.py")
         (self.repo / "xray_forge").mkdir()
         shutil.copy(ROOT / "xray_forge" / "__init__.py", self.repo / "xray_forge" / "__init__.py")
+        (self.repo / "electron").mkdir()
+        for name in ("package.json", "package-lock.json"):         # check_version also compares the desktop app's version
+            shutil.copy(ROOT / "electron" / name, self.repo / "electron" / name)
 
     def write(self, rel: str, data: bytes | str = b"x", mode: int | None = None) -> pathlib.Path:
         p = self.repo / rel
@@ -286,7 +289,7 @@ def _builder_version(log: pathlib.Path) -> str:
 
 def test_installer_version_comes_from_the_tag(run):
     log = _stub_npx(run)
-    (run.repo / "electron").mkdir()
+    (run.repo / "electron").mkdir(exist_ok=True)
     env = {"GITHUB_REF_TYPE": "tag", "GITHUB_REF_NAME": "v2.1.0"}
     ok(run.step("desktop", "Build the installer", env=env))
     assert _builder_version(log) == "2.1.0"
@@ -294,7 +297,7 @@ def test_installer_version_comes_from_the_tag(run):
 
 def test_prerelease_tag_keeps_its_suffix_in_the_installer_version(run):
     log = _stub_npx(run)
-    (run.repo / "electron").mkdir()
+    (run.repo / "electron").mkdir(exist_ok=True)
     ok(run.step("desktop", "Build the installer", env={"GITHUB_REF_TYPE": "tag", "GITHUB_REF_NAME": "v2.1.0-rc1"}))
     assert _builder_version(log) == "2.1.0-rc1"
 
@@ -302,7 +305,7 @@ def test_prerelease_tag_keeps_its_suffix_in_the_installer_version(run):
 def test_branch_build_uses_the_package_version_and_never_signs(run):
     from xray_forge import __version__
     log = _stub_npx(run)
-    (run.repo / "electron").mkdir()
+    (run.repo / "electron").mkdir(exist_ok=True)
     ok(run.step("desktop", "Build the installer", env={"GITHUB_REF_TYPE": "branch", "GITHUB_REF_NAME": "feat/x"}))
     assert _builder_version(log) == __version__
     assert find_step("desktop", "Build the installer")["env"]["CSC_IDENTITY_AUTO_DISCOVERY"] == "false"

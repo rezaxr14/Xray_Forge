@@ -984,6 +984,11 @@ function msOptions() {
   const text = (id, key) => { const v = $(id).value.trim(); if (v) o[key] = v; };
   text('#ms-address', 'address'); text('#ms-sni', 'server_name'); text('#ms-profile', 'profile_id');
   if ($('#ms-port').value.trim()) o.port = Number($('#ms-port').value);
+  // secrets: sent to the engine for the run, never saved (not in PERSIST) and never echoed (the engine redacts them)
+  if ($('#ms-token').value) o.auth_token = $('#ms-token').value;
+  if ($('#ms-license').value) o.license_key = $('#ms-license').value;
+  const doh = $('#ms-doh').value.split(',').map((s) => s.trim()).filter(Boolean);
+  if (doh.length) o.doh_servers = doh;
   return o;
 }
 
@@ -1147,7 +1152,7 @@ const PERSIST = [
   'sc-tcp-timeout', 'sc-tls-timeout', 'sc-tcp-retries',
   ...['hc', 'sk'].flatMap((p) => ['dns', 'tcp', 'tls', 'request', 'transfer'].map((s) => `${p}-t-${s}`)),
   'sn-snis', 'sn-presets', 'sn-http', 'sn-port', 'sn-frag', 'sn-workers', 'sn-fmt',
-  'ms-http2', 'ms-l4', 'ms-ipv6', 'ms-bind', 'ms-dns', 'ms-address', 'ms-port', 'ms-sni', 'ms-profile',
+  'ms-http2', 'ms-l4', 'ms-ipv6', 'ms-bind', 'ms-dns', 'ms-address', 'ms-port', 'ms-sni', 'ms-profile', 'ms-doh',
   'wp-count', 'wp-format', 'mt-use-ca', 'mt-platform', 'mt-cn', 'mt-permitted',
 ];
 // `ready` is false until the saved values are restored, so the events fired while

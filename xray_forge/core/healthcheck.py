@@ -114,6 +114,14 @@ class HealthReport:
 # ===========================================================================
 
 def probe_dns(host: str, timeout: float = 4.0) -> StageResult:
+    import ipaddress
+    literal = host.strip("[]")
+    try:
+        ipaddress.ip_address(literal)
+    except ValueError:
+        pass
+    else:                                   # nothing to resolve: an IP literal is its own answer
+        return StageResult("dns", True, ms=0.0, detail="ip literal", data={"ips": [literal]})
     from xray_forge.core.probe import doh_resolve
     t0 = time.perf_counter()
     try:

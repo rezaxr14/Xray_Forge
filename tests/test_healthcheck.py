@@ -308,3 +308,25 @@ def test_tagged_lines_vmess_and_ipv6_and_idempotence():
         assert parse_target(line).path == out.path
         assert hc.tagged_lines([_tagged_report(once, ["fake-sni"])])[0] == once
     assert hc.tagged_lines([_tagged_report(VLESS_TLS_WS, [])])[0] == VLESS_TLS_WS
+
+
+
+# ------------------------------------------------------------- IP-literal targets
+@pytest.mark.parametrize("host", ["188.114.97.6", "2606:4700:4700::1111", "[2606:4700:4700::1111]"])
+def test_dns_stage_passes_for_ip_literals_without_any_lookup(host, monkeypatch):
+    import xray_forge.core.probe as probe
+
+    def boom(*a, **k):
+        raise AssertionError("no DoH lookup for an IP literal")
+    monkeypatch.setattr(probe, "doh_resolve", boom)
+    r = hc.probe_dns(host)
+    assert r.ok is True and r.detail == "ip literal" and r.data["ips"] == [host.strip("[]")]
+
+
+def test_dns_stage_still_resolves_names(monkeypatch):
+    import xray_forge.core.probe as probe
+    monkeypatch.setattr(probe, "doh_resolve", lambda host, timeout=4.0: ["1.2.3.4"])
+    r = hc.probe_dns("example.com")
+    assert r.ok and r.data["ips"] == ["1.2.3.4"] and r.detail == ""
+    monkeypatch.setattr(probe, "doh_resolve", lambda host, timeout=4.0: [])
+    assert hc.probe_dns("example.com").ok is False

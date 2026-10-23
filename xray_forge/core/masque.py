@@ -42,7 +42,10 @@ NEEDS_FORK = ("this sing-box build has no MASQUE outbound (masque); "
 
 
 DNS_MODES = ("auto", "system", "doh")
-DOH_SERVERS = ("1.1.1.1", "8.8.8.8")        # IP literals: the resolver must not itself need resolving
+# IP literals: the resolver must not itself need resolving.  Google first: 1.1.1.1:443 is
+# blackholed on some networks and the core does not fall through to the next server.
+DOH_SERVERS = ("8.8.8.8", "1.1.1.1")
+FAKE_IP_PROBES = ("api.cloudflareclient.com", "cloudflare.com", "example.com")   # first = what the core dials
 
 
 def system_dns_is_fake() -> bool:
@@ -51,20 +54,32 @@ def system_dns_is_fake() -> bool:
     import ipaddress
     import socket
     net = ipaddress.ip_network("198.18.0.0/15")
+    for name in FAKE_IP_PROBES:               # split DNS can answer some names for real and others fake
+        try:
+            infos = socket.getaddrinfo(name, 443, socket.AF_INET, socket.SOCK_STREAM)
+        except OSError:
+            continue
+        if any(ipaddress.ip_address(i[4][0]) in net for i in infos):
+            return True
+    return False
+
+
+def _is_ip(s: str) -> bool:
+    import ipaddress
     try:
-        infos = socket.getaddrinfo("cloudflare.com", 443, socket.AF_INET, socket.SOCK_STREAM)
-    except OSError:
+        ipaddress.ip_address(s)
+    except ValueError:
         return False
-    return any(ipaddress.ip_address(i[4][0]) in net for i in infos)
+    return True
 
 
-def _dns_servers(mode: str) -> list[dict[str, Any]]:
+def _dns_servers(mode: str, doh: tuple[str, ...] = DOH_SERVERS) -> list[dict[str, Any]]:
     if mode == "auto":
         mode = "doh" if system_dns_is_fake() else "system"
     if mode == "system":
         return [{"type": "local", "tag": "default"}]
     return [{"type": "https", "tag": "default" if i == 0 else f"doh{i}", "server": ip, "server_port": 443}
-            for i, ip in enumerate(DOH_SERVERS)]
+            for i, ip in enumerate(doh)]
 
 
 def _bool(v: Any, what: str) -> bool:
@@ -92,12 +107,16 @@ class MasqueOptions:
     record_fragment: bool = False
     congestion_controller: str = "bbr"
     dns: str = "auto"                   # "system" | "doh" (IP-literal DoH) | "auto" (doh only if the resolver is fake-IP)
+    doh_servers: tuple = DOH_SERVERS    # IP literals used by dns="doh" (and "auto" on fake-IP resolvers)
     bind_interface: bool = False        # route.auto_detect_interface; broke HTTP/2 on a TUN machine, so opt-in
     profile_id: str = ""                # an existing device profile; empty = the fork creates one
     auth_token: str = field(default="", repr=False)
     license_key: str = field(default="", repr=False)
 
     def validate(self) -> "MasqueOptions":
+        if (not isinstance(self.doh_servers, tuple) or not 1 <= len(self.doh_servers) <= 4
+                or not all(isinstance(s, str) and _is_ip(s) for s in self.doh_servers)):
+            raise ValueError("doh_servers must be 1 to 4 IP addresses (IP literals, not host names)")
         if self.dns not in DNS_MODES:
             raise ValueError("dns must be one of: " + ", ".join(DNS_MODES))
         for name in ("use_http2", "use_l4_proxy", "use_ipv6", "insecure", "fragment", "record_fragment", "bind_interface"):
@@ -128,6 +147,12 @@ class MasqueOptions:
         for key in params:
             if key not in known:
                 raise ValueError(f"unknown option {str(key)[:40]!r}")
+        params = dict(params)
+        if "doh_servers" in params:
+            ds = params["doh_servers"]
+            if not isinstance(ds, (list, tuple)):
+                raise ValueError("doh_servers must be a list of IP addresses")
+            params["doh_servers"] = tuple(ds)
         return cls(**params).validate()
 
 
@@ -156,7 +181,7 @@ def build_client_config(opts: MasqueOptions, socks_port: int) -> dict[str, Any]:
         route["auto_detect_interface"] = True
     return {
         "log": {"level": "warn"},
-        "dns": {"servers": _dns_servers(opts.dns)},
+        "dns": {"servers": _dns_servers(opts.dns, opts.doh_servers)},
         "inbounds": [{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": socks_port}],
         "outbounds": [{"type": "direct", "tag": "direct"}, outbound],
         "route": route,

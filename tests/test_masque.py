@@ -261,7 +261,7 @@ def _dns(cfg):
 def test_doh_mode_uses_ip_literal_servers_so_it_never_needs_resolution():
     cfg = masque.build_client_config(masque.MasqueOptions(dns="doh"), 1080)
     servers = _dns(cfg)
-    assert [s["server"] for s in servers] == ["1.1.1.1", "8.8.8.8"]
+    assert [s["server"] for s in servers] == ["8.8.8.8", "1.1.1.1"]
     assert all(s["type"] == "https" and s["server_port"] == 443 for s in servers)
     assert servers[0]["tag"] == "default" and len({s["tag"] for s in servers}) == 2
     assert not any("domain_resolver" in s for s in servers)             # a self-referencing resolver broke it
@@ -308,3 +308,41 @@ def test_bind_interface_is_opt_in():
 def test_new_options_are_validated(bad):
     with pytest.raises(ValueError):
         masque.MasqueOptions.from_params(bad)
+
+
+# ------------------------------------- split-horizon fake-IP and DoH server choice
+def test_fake_ip_detection_checks_the_host_the_core_will_dial(monkeypatch):
+    """Split DNS: cloudflare.com can resolve for real while api.cloudflareclient.com is fake-IP."""
+    import socket
+    real, fake = "104.16.133.229", "198.18.6.66"
+
+    def gai(host, *a, **k):
+        ip = fake if host == "api.cloudflareclient.com" else real
+        return [(socket.AF_INET, 1, 6, "", (ip, 0))]
+    monkeypatch.setattr(socket, "getaddrinfo", gai)
+    assert REAL_DETECT() is True
+
+
+def test_fake_ip_detection_survives_one_name_failing(monkeypatch):
+    import socket
+
+    def gai(host, *a, **k):
+        if host == "api.cloudflareclient.com":
+            raise socket.gaierror("no")
+        return [(socket.AF_INET, 1, 6, "", ("198.19.0.5" if host == "cloudflare.com" else "104.16.0.1", 0))]
+    monkeypatch.setattr(socket, "getaddrinfo", gai)
+    assert REAL_DETECT() is True
+
+
+def test_doh_server_order_puts_the_google_resolver_first_and_is_configurable():
+    cfg = masque.build_client_config(masque.MasqueOptions(dns="doh"), 1080)
+    assert [s["server"] for s in cfg["dns"]["servers"]] == ["8.8.8.8", "1.1.1.1"]      # 1.1.1.1:443 is blackholed in some networks
+    custom = masque.build_client_config(masque.MasqueOptions(dns="doh", doh_servers=("9.9.9.9", "149.112.112.112")), 1080)
+    assert [(s["tag"], s["server"]) for s in custom["dns"]["servers"]] == [("default", "9.9.9.9"), ("doh1", "149.112.112.112")]
+    assert masque.MasqueOptions.from_params({"doh_servers": ["9.9.9.9"]}).doh_servers == ("9.9.9.9",)
+
+
+@pytest.mark.parametrize("bad", [[], ["dns.google"], ["1.1.1.1", "not-an-ip"], "8.8.8.8", [8], ["1.1.1.1"] * 5, [["1.1.1.1"]], None, ["10.0.0.1 "]])
+def test_doh_servers_must_be_a_short_list_of_ip_literals(bad):
+    with pytest.raises(ValueError):
+        masque.MasqueOptions.from_params({"doh_servers": bad})

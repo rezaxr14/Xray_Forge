@@ -454,6 +454,12 @@
         <label>Existing profile id <input id="ms-profile" type="text" size="22" placeholder="the fork creates one"></label>
       </div>
       <div class="row">
+        <label>Profile auth token <input id="ms-token" type="password" size="22" autocomplete="off" placeholder="optional; never saved or shown"></label>
+        <label>License key <input id="ms-license" type="password" size="22" autocomplete="off" placeholder="optional; never saved or shown"></label>
+        <label>DoH servers (IPs) <input id="ms-doh" type="text" size="26" placeholder="8.8.8.8, 1.1.1.1"></label>
+        <span class="muted">Register a profile on a network that can reach Cloudflare, then paste its id and token here if your network blocks registration.</span>
+      </div>
+      <div class="row">
         <button id="ms-config">Show config</button>
         <button id="ms-probe" class="primary">Test connection</button>
         <button id="ms-cancel" disabled>Cancel</button>

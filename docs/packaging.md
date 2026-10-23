@@ -24,6 +24,12 @@ cd electron && npm install && npx electron-builder --publish never
 # -> electron/release/XrayForge-<version>-<os>-<arch>.{exe,AppImage}
 ```
 
+**Windows:** electron-builder unpacks a code-signing helper cache that contains macOS symlinks; without
+symlink rights it fails with "Cannot create symbolic link : A required privilege is not held by the client"
+and no installer is produced (the `win-unpacked` folder still works). Enable Developer Mode (Settings -> System ->
+For developers) or build from an elevated shell. GitHub's Windows runners are not affected. This was seen on a
+real machine, not reproduced in CI.
+
 `tools/smoke_engine.py` is the gate: it starts the frozen engine, asks for
 `engine.info`, parses a link and checks the scan/MITM methods are present
 (a missing module in the bundle shows up here, not in front of a user).

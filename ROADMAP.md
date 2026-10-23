@@ -85,6 +85,13 @@ Still open from the review (next sprints):
   our own window's local page, all permission requests denied, webviews blocked, single-instance lock.
   `test/packaging-files.test.js` fails if a module loaded at startup is missing from `build.files`.
   Still **not** exercised: real Electron (windows, dialogs, installer), only the fake.
+- ✅ **Field-report fixes** (first real-machine run, `docs/field-reports/2026-10-23/`): fake-IP detection
+  probes the dialed host (split DNS), DoH order/`doh_servers` configurable, MASQUE auth token and license key
+  fields (password inputs; sent, never saved or shown), IP-literal links pass the DNS stage, Windows python
+  default, desktop version synced (2.1.0) and checked by `check_version.py`. Verified on that machine so far: unit/e2e
+  suites (661 + 69), the frozen engine build and app launch, real dialogs, single-instance, permission denial,
+  external links, scan+stop, MASQUE tab. **Not** achievable from that network: MASQUE registration, VLESS
+  tests (Cloudflare endpoints filtered). Installer build blocked by Windows symlink rights (environmental).
 - ✅ `tools/live_check.py` + `docs/local-agent-runbook.md`: a redacted JSON report
   for env / masque / psiphon / vless throughput / warp-scan, and the jobs a local
   agent runs (locks, live checks, desktop build, shell hand-test). Offline tests

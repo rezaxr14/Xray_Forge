@@ -81,3 +81,5 @@ details.adv summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .bridges h3 { margin: 16px 0 4px; }
 .bridges > p { margin: 2px 0 8px; }
 .bridges textarea { width: 100%; }
+
+.dl { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 8px 0; }

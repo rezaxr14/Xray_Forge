@@ -91,6 +91,19 @@ Main-process hardening (only a fake Electron has exercised these so far), in the
 
 Report: a short list of what worked and what did not, with the exact visible error text.
 
+## Job 4b: real core downloads
+
+The downloader's asset-name rules were written without access to live release data, so this is the first
+real test. In the app (Cores tab, and the Download button on the MASQUE / Psiphon tab) or with the engine:
+
+- For each of xray, sing-box, mihomo and sing-box-extended: press Download, read the review line (tag, asset,
+  size, sha256, repo), then confirm. Report per core: the exact review line, whether install succeeded, the
+  version shown, and the exact error text if it refused ("no matching ... download", "more than one ...",
+  "no sha256 digest ..." are the expected refusal reasons: copy them verbatim plus the release tag).
+- If a core refuses, list that release's asset file names (from its GitHub releases page) so the rules can be fixed.
+- Check that nothing outside `~/.xray_forge/cores/` was written and no temp `.dl-*` folders remain.
+- Note whether GitHub was reachable at all from your network (api.github.com and release downloads).
+
 ## Job 5: Windows test suite and fake-core fixtures
 
     python -m pytest -q

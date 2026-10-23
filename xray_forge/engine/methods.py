@@ -549,7 +549,7 @@ def build(emit, sources: SourceManager | None = None
 
     from xray_forge.engine import scan_methods, core_methods, ui_methods, masque_methods, psiphon_methods
     scan_methods.register(d, jobs)
-    core_methods.register(d)
+    core_methods.register(d, jobs)
     masque_methods.register(d, jobs)
     psiphon_methods.register(d, jobs)
     ui_methods.register(d)

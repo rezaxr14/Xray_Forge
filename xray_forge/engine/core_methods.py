@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from xray_forge.core.cores import discover, get_core, iter_cores
-from xray_forge.engine.rpc import Dispatcher, invalid_params
+from xray_forge.core.cores import discover, get_core, install, iter_cores
+from xray_forge.engine.rpc import APP_ERROR, Dispatcher, RpcError, invalid_params
 
 
 def describe(core_name: str, with_version: bool = True) -> dict[str, Any]:
@@ -26,7 +26,7 @@ def installed_cores() -> list[str]:
     return [c.name for c in iter_cores() if discover.find_binary(c.name)]
 
 
-def register(d: Dispatcher) -> None:
+def register(d: Dispatcher, jobs=None) -> None:
     @d.method("core.detect")
     def core_detect() -> list[dict]:
         return [describe(c.name) for c in iter_cores()]
@@ -54,3 +54,36 @@ def register(d: Dispatcher) -> None:
                 raise invalid_params(f"{name} did not answer its version command: {text}")
         discover.save_path(name, path)
         return describe(name)
+
+    def downloadable(name: Any) -> str:
+        if not isinstance(name, str) or name not in install.SOURCES:
+            raise invalid_params("name must be one of: " + ", ".join(install.SOURCES))
+        return name
+
+    @d.method("core.release")
+    def core_release(name: Any = "") -> dict:
+        """What ``core.install`` would download (latest official release for this platform); nothing is fetched."""
+        name = downloadable(name)
+        try:
+            return install.release_info(name, install.GitHubFetcher())
+        except install.InstallError as e:
+            raise RpcError(APP_ERROR, str(e)) from None
+
+    @d.method("core.install")
+    def core_install(name: Any = "") -> dict:
+        """Download, verify (GitHub's sha256 digest) and unpack the latest official release (a job).
+
+        The binary is remembered as the core's path only if it answers its version command."""
+        name = downloadable(name)
+
+        def run(ctx) -> dict:
+            try:
+                res = install.install(name, progress=ctx.progress, stop=ctx.stop)
+            except install.Cancelled:
+                return {"status": "cancelled"}
+            ok, text = discover.version(name, res["path"])
+            res["ok"], res["version"] = ok, text
+            if ok:
+                discover.save_path(name, res["path"])
+            return res
+        return {"job": jobs.start("core.install", run)}

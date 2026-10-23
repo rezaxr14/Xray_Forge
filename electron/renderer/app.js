@@ -1020,6 +1020,8 @@ $('#ms-clear').addEventListener('click', () => guarded($('#ms-msg'), async () =>
   await refreshMasque();
 }));
 $('#ms-browse').addEventListener('click', () => guarded($('#ms-msg'), () => pickInto($('#ms-path'), $('#ms-msg'), 'Select sing-box-extended')));
+$('#ms-download').addEventListener('click', () => offerDownload('singbox_extended', 'sing-box-extended', $('#ms-msg'), $('#ms-dl'),
+  async (res) => { $('#ms-path').value = res.path; await refreshMasque(); }));
 $('#ms-config').addEventListener('click', () => guarded($('#ms-msg'), async () => {
   $('#ms-out').value = (await call('masque.config', { options: msOptions() })).content;
   say($('#ms-msg'), 'config built (tokens hidden)');
@@ -1205,6 +1207,42 @@ for (const ev of ['input', 'change']) {
 }
 
 // ------------------------------------------------------------------ Cores
+// Downloads: the engine only fetches from the project's official GitHub releases and checks GitHub's
+// sha256 digest; the user sees exactly what will be fetched and must confirm first.
+const DOWNLOADABLE = ['xray', 'singbox', 'mihomo'];
+function offerDownload(core, label, msgEl, host, onDone) {
+  return guarded(msgEl, async () => {
+    say(msgEl, 'checking the latest release…');
+    const r = await call('core.release', { name: core });
+    host.replaceChildren();
+    const go = h('button', { class: 'primary', 'data-act': 'dl-go' }, 'Download and install');
+    const no = h('button', { 'data-act': 'dl-no' }, 'Cancel');
+    const stopBtn = h('button', { 'data-act': 'dl-stop', hidden: true }, 'Stop');
+    const bar = h('progress', { value: 0, max: 1, hidden: true });
+    const close = () => host.replaceChildren();
+    no.addEventListener('click', () => { close(); say(msgEl, ''); });
+    go.addEventListener('click', () => guarded(msgEl, async () => {
+      const started = await call('core.install', { name: core });
+      go.disabled = true; no.hidden = true; stopBtn.hidden = false; bar.hidden = false;
+      stopBtn.addEventListener('click', () => call('job.cancel', { job: started.job }));
+      say(msgEl, `downloading ${label} ${r.tag}…`);
+      await runJob(null, null, (ev) => {
+        if (ev.type === 'progress') { bar.max = ev.total || 1; bar.value = ev.done; return; }
+        if (ev.type !== 'done' && ev.type !== 'error') return;
+        close();
+        if (ev.type === 'error') say(msgEl, ev.message, true);
+        else if (ev.cancelled) say(msgEl, 'download cancelled');
+        else if (!ev.result.ok) say(msgEl, `downloaded ${ev.result.tag} but it did not run: ${ev.result.version}`, true);
+        else { say(msgEl, `${label} ${ev.result.tag} installed (${ev.result.version})`); onDone(ev.result); }
+      }, started.job);
+    }));
+    host.append(h('div', { class: 'dl' },
+      h('span', {}, `${label} ${r.tag} · ${r.asset} · ${(r.size / 1048576).toFixed(1)} MB · sha256 ${r.sha256.slice(0, 16)}… · from github.com/${r.repo}`),
+      go, no, bar, stopBtn));
+    say(msgEl, 'review, then press Download and install');
+  });
+}
+
 function renderCores(rows) {
   const body = $('#co-table tbody');
   body.replaceChildren();
@@ -1226,6 +1264,8 @@ function renderCores(rows) {
         const p = await window.forge.pickPath({ title: `Select ${r.display_name}` });
         if (p) { input.value = p; say($('#co-msg'), 'press Set to use it'); }
       }) }, 'Browse…'), h('button', { 'data-act': 'set', onclick: () => apply(input.value.trim()) }, 'Set'),
+        DOWNLOADABLE.includes(r.name) ? h('button', { 'data-act': 'download',
+          onclick: () => offerDownload(r.name, r.display_name, $('#co-msg'), $('#co-dl'), () => refreshCores(true)) }, 'Download…') : null,
         h('button', { 'data-act': 'clear', onclick: () => apply('') }, 'Clear'))));
   }
 }

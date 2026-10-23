@@ -92,6 +92,13 @@ Still open from the review (next sprints):
   suites (661 + 69), the frozen engine build and app launch, real dialogs, single-instance, permission denial,
   external links, scan+stop, MASQUE tab. **Not** achievable from that network: MASQUE registration, VLESS
   tests (Cloudflare endpoints filtered). Installer build blocked by Windows symlink rights (environmental).
+- ✅ **In-app core downloads** (`core/cores/install.py`, `core.release` / `core.install`, Download buttons on the
+  Cores and MASQUE tabs): official GitHub release only, https + GitHub hosts + checked redirects, the asset must sit under the
+  core's official repo, GitHub's sha256 digest is required and verified, size caps, only known file names are written
+  (archive paths ignored), nothing executed until the user confirms and the binary answers its version command. Tested with a
+  fake fetcher and a mutation-checked policy; **not** exercised against live GitHub, so the asset-name rules
+  (Xray-*, sing-box-*, mihomo-*) are unverified (see runbook Job 4b). Psiphon is not downloadable (no official standalone
+  build was verified).
 - ✅ `tools/live_check.py` + `docs/local-agent-runbook.md`: a redacted JSON report
   for env / masque / psiphon / vless throughput / warp-scan, and the jobs a local
   agent runs (locks, live checks, desktop build, shell hand-test). Offline tests

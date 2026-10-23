@@ -1567,3 +1567,112 @@ test('Bridges tab: DoH servers and secret fields (sent, never shown, never saved
     assert.equal(await second.page.inputValue('#ms-license'), '');
   } finally { await second.close(); }
 });
+
+// ------------------------------------------------------------ core downloads (UI only)
+// The real engine does the work in the Python tests; here the two download methods are faked at the
+// renderer boundary so the review step, progress, stop and refresh behaviour can be checked.
+async function fakeDownloads(page, { fail = false, finish = false } = {}) {
+  await page.evaluate(([failIt, finishIt]) => {
+    window.__dl = { calls: [], job: null };
+    const orig = window.forge.call;
+    window.forge.call = async (m, p) => {
+      if (m === 'core.release') {
+        window.__dl.calls.push([m, p]);
+        return { core: p.name, repo: 'XTLS/Xray-core', tag: 'v9.9.9', asset: 'Xray-linux-64.zip', size: 12582912,
+          sha256: 'abcdef0123456789'.repeat(4), url: 'https://github.com/XTLS/Xray-core/releases/download/v9.9.9/Xray-linux-64.zip' };
+      }
+      if (m === 'core.install') {
+        window.__dl.calls.push([m, p]); window.__dl.job = 'dl-job-1';
+        setTimeout(() => window.__forgeJob({ job: 'dl-job-1', type: 'started', kind: 'core.install' }), 20);
+        setTimeout(() => window.__forgeJob({ job: 'dl-job-1', type: 'progress', done: 6291456, total: 12582912 }), 40);
+        if (finishIt) setTimeout(() => window.__forgeJob({ job: 'dl-job-1', type: 'done', cancelled: false, result: { ok: true, tag: 'v9.9.9', version: 'fake 9.9.9', path: '/opt/forge/sing-box-extended' } }), 80);
+        if (failIt) setTimeout(() => window.__forgeJob({ job: 'dl-job-1', type: 'error', message: 'checksum mismatch: the download does not match the release digest' }), 80);
+        return { job: 'dl-job-1' };
+      }
+      if (m === 'job.cancel' && p.job === 'dl-job-1') {
+        window.__dl.calls.push([m, p]);
+        setTimeout(() => window.__forgeJob({ job: 'dl-job-1', type: 'done', cancelled: true, result: { status: 'cancelled' } }), 20);
+        return true;
+      }
+      return orig(m, p);
+    };
+  }, [fail, finish]);
+}
+
+test('Cores tab: download shows what will be fetched, asks first, reports progress and can be stopped', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.click('[data-tab=cores]');
+    await page.waitForSelector('#co-table tbody tr');
+    await fakeDownloads(page);
+    assert.equal(await page.locator('[data-row=xray] [data-act=download]').count(), 1);
+    await page.click('[data-row=xray] [data-act=download]');
+    await page.waitForSelector('#co-dl [data-act=dl-go]');
+    const review = await page.textContent('#co-dl');
+    assert.match(review, /v9\.9\.9/); assert.match(review, /Xray-linux-64\.zip/); assert.match(review, /12\.0 MB/);
+    assert.match(review, /abcdef0123456789/); assert.match(review, /github\.com\/XTLS\/Xray-core/);
+    assert.match(await page.textContent('#co-msg'), /review, then press Download and install/);
+    assert.equal(await page.evaluate(() => window.__dl.calls.some((c) => c[0] === 'core.install')), false);   // nothing downloads before the click
+
+    await page.click('#co-dl [data-act=dl-no]');
+    assert.equal(await page.locator('#co-dl [data-act=dl-go]').count(), 0);
+    assert.equal(await page.textContent('#co-msg'), '');
+    assert.equal(await page.evaluate(() => window.__dl.calls.some((c) => c[0] === 'core.install')), false);
+
+    await page.click('[data-row=xray] [data-act=download]');
+    await page.waitForSelector('#co-dl [data-act=dl-go]');
+    await page.click('#co-dl [data-act=dl-go]');
+    await page.waitForFunction(() => document.querySelector('#co-dl progress') && document.querySelector('#co-dl progress').value > 0);
+    assert.deepEqual(await page.evaluate(() => window.__dl.calls.filter((c) => c[0] === 'core.install')), [['core.install', { name: 'xray' }]]);
+    assert.equal(await page.isDisabled('#co-dl [data-act=dl-go]'), true);
+    await page.click('#co-dl [data-act=dl-stop]');
+    await page.waitForFunction(() => /cancel/.test(document.querySelector('#co-msg').textContent));
+    assert.equal(await page.locator('#co-dl [data-act=dl-go]').count(), 0);
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('Cores tab: a failed download shows the reason and nothing else changes', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.click('[data-tab=cores]');
+    await page.waitForSelector('#co-table tbody tr');
+    await fakeDownloads(page, { fail: true });
+    await page.click('[data-row=xray] [data-act=download]');
+    await page.click('#co-dl [data-act=dl-go]');
+    await page.waitForFunction(() => /checksum mismatch/.test(document.querySelector('#co-msg').textContent));
+    assert.match(await page.getAttribute('#co-msg', 'class'), /bad-text/);
+    assert.equal(await page.inputValue('[data-core=xray]'), '');
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('Bridges tab: sing-box-extended can be downloaded the same way and refreshes the status', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.click('[data-tab=bridges]');
+    await page.waitForFunction(() => /not found/.test(document.querySelector('#ms-status').textContent));
+    await fakeDownloads(page);
+    await page.click('#ms-download');
+    await page.waitForSelector('#ms-dl [data-act=dl-go]');
+    await page.click('#ms-dl [data-act=dl-go]');
+    await page.waitForFunction(() => document.querySelector('#ms-dl progress') && document.querySelector('#ms-dl progress').value > 0);
+    assert.deepEqual(await page.evaluate(() => window.__dl.calls.filter((c) => c[0] !== 'job.cancel').map((c) => [c[0], c[1].name])),
+      [['core.release', 'singbox_extended'], ['core.install', 'singbox_extended']]);
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('Bridges tab: a finished download fills in the binary path and says so', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.click('[data-tab=bridges]');
+    await fakeDownloads(page, { finish: true });
+    await page.click('#ms-download');
+    await page.click('#ms-dl [data-act=dl-go]');
+    await page.waitForFunction(() => document.querySelector('#ms-path').value === '/opt/forge/sing-box-extended');
+    assert.match(await page.textContent('#ms-msg'), /sing-box-extended v9\.9\.9 installed \(fake 9\.9\.9\)/);
+    assert.equal(await page.locator('#ms-dl [data-act=dl-go]').count(), 0);
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});

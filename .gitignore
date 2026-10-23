@@ -65,7 +65,9 @@ target/
 venv/
 ENV/
 env/
-.venv
+.
+.venv-lock/
+.venv/
 
 # IDE
 .idea/

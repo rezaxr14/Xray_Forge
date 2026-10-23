@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "env": {
+    "python": "3.12.3",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "xray_forge": "2.1.0",
+    "cores": [
+      {
+        "name": "xray",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      },
+      {
+        "name": "singbox",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      },
+      {
+        "name": "singbox_extended",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      },
+      {
+        "name": "psiphon",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      },
+      {
+        "name": "mihomo",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      }
+    ]
+  },
+  "checks": [
+    {
+      "name": "masque",
+      "status": "ran",
+      "ok": false,
+      "detail": "core: TimeoutError",
+      "ms": null,
+      "cc": "",
+      "exit_ip_seen": false,
+      "seconds": 62.2
+    }
+  ]
+}

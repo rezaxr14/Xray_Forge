@@ -28,7 +28,7 @@ SPECS: dict[str, dict] = {
     "singbox_extended": {"env": "SINGBOX_EXTENDED_CORE", "names": ("sing-box-extended",),
                          "v2rayn": (), "version_args": ("version",)},
     # Psiphon's console client: the user supplies the binary and their own config
-    "psiphon": {"env": "PSIPHON_CORE", "names": ("ConsoleClient", "psiphon-console-client"),
+    "psiphon": {"env": "PSIPHON_CORE", "names": ("ConsoleClient", "psiphon-tunnel-core", "psiphon-console-client"),
                 "v2rayn": (), "version_args": ("-version",)},
     "mihomo": {"env": "MIHOMO_CORE", "names": ("mihomo", "clash-meta", "verge-mihomo"),
                "v2rayn": ("mihomo", "clash_meta"), "version_args": ("-v",)},

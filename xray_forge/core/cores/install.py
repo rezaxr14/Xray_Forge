@@ -29,6 +29,7 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -47,7 +48,9 @@ SOURCES: dict[str, dict[str, Any]] = {
     "singbox": {"repo": "SagerNet/sing-box", "binary": "sing-box", "inside": ("sing-box",), "extras": ()},
     "singbox_extended": {"repo": "shtorm-7/sing-box-extended", "binary": "sing-box-extended",
                          "inside": ("sing-box-extended", "sing-box"), "extras": ()},
-    "mihomo": {"repo": "MetaCubeX/mihomo", "binary": "mihomo", "inside": ("mihomo",), "extras": ()},
+    # the real Windows zip holds "mihomo-windows-amd64.exe" (platform-suffixed, sometimes version-suffixed too)
+    "mihomo": {"repo": "MetaCubeX/mihomo", "binary": "mihomo", "inside": ("mihomo",), "extras": (),
+               "member_re": r"mihomo(?:-(?:windows|linux|darwin)-[a-z0-9]+(?:-v?\d[\w.]*)?)?(?:\.exe)?"},
 }
 XRAY_NAMES = {("windows", "amd64"): "Xray-windows-64.zip", ("windows", "arm64"): "Xray-windows-arm64-v8a.zip",
               ("linux", "amd64"): "Xray-linux-64.zip", ("linux", "arm64"): "Xray-linux-arm64-v8a.zip",
@@ -191,12 +194,13 @@ def release_info(core: str, fetcher=None, plat: tuple[str, str] | None = None) -
 
 
 # ----------------------------------------------------------------------------- unpack
-def _pick(members: list[tuple[str, Any]], wanted: tuple[str, ...]) -> Any | None:
+def _pick(members: list[tuple[str, Any]], wanted: tuple[str, ...], pattern: "re.Pattern[str] | None" = None) -> Any | None:
     """The shallowest member whose *base name* is wanted (archive paths are never used)."""
     best = None
     for name, ref in members:
         norm = name.replace("\\", "/")
-        if posixpath.basename(norm) in wanted:
+        base = posixpath.basename(norm)
+        if base in wanted or (pattern is not None and pattern.fullmatch(base)):
             depth = norm.strip("/").count("/")
             if best is None or depth < best[0]:
                 best = (depth, ref)
@@ -214,27 +218,27 @@ def _extract(core: str, archive: str, asset: str, out_dir: str, os_: str) -> Non
     spec = SOURCES[core]
     exe = ".exe" if os_ == "windows" else ""
     names = tuple(n + e for n in spec["inside"] for e in ("", ".exe"))
+    pattern = re.compile(spec["member_re"]) if spec.get("member_re") else None
     files: dict[str, bytes] = {}
     if asset.endswith(".gz") and not asset.endswith(".tar.gz"):
         with gzip.open(archive, "rb") as g:
             files[spec["binary"] + exe] = _read_limited(g, "binary")
     else:
-        opened: list[tuple[str, Any]]
-        if asset.endswith(".zip"):
-            z = zipfile.ZipFile(archive)
-            opened = [(i.filename, i) for i in z.infolist() if not i.is_dir()]
-            opener = z.open
-        else:
-            t = tarfile.open(archive, "r:gz")
-            opened = [(m.name, m) for m in t.getmembers() if m.isfile()]
-            opener = t.extractfile
-        bin_ref = _pick(opened, names)
-        if bin_ref is not None:
-            files[spec["binary"] + exe] = _read_limited(opener(bin_ref), "binary")
-        for extra in spec["extras"]:
-            ref = _pick(opened, (extra,))
-            if ref is not None:
-                files[extra] = _read_limited(opener(ref), extra)
+        # the archive must be closed before the caller removes its folder (an open handle blocks that on Windows)
+        with (zipfile.ZipFile(archive) if asset.endswith(".zip") else tarfile.open(archive, "r:gz")) as arc:
+            if asset.endswith(".zip"):
+                opened = [(i.filename, i) for i in arc.infolist() if not i.is_dir()]
+                opener = arc.open
+            else:
+                opened = [(m.name, m) for m in arc.getmembers() if m.isfile()]
+                opener = arc.extractfile
+            bin_ref = _pick(opened, names, pattern)
+            if bin_ref is not None:
+                files[spec["binary"] + exe] = _read_limited(opener(bin_ref), "binary")
+            for extra in spec["extras"]:
+                ref = _pick(opened, (extra,))
+                if ref is not None:
+                    files[extra] = _read_limited(opener(ref), extra)
     if spec["binary"] + exe not in files:
         raise InstallError(f"the download does not contain {spec['binary']}")
     for name, data in files.items():
@@ -255,6 +259,18 @@ class _HashingWriter:
         return self.fh.write(b)
 
 
+def _sweep_stale(core_dir: str, max_age: float = 3600.0) -> None:
+    """Remove staging folders left by crashed or failed earlier attempts (recent ones may be a live install)."""
+    now = time.time()
+    for name in os.listdir(core_dir):
+        path = os.path.join(core_dir, name)
+        try:
+            if name.startswith(".dl-") and os.path.isdir(path) and now - os.path.getmtime(path) > max_age:
+                shutil.rmtree(path, ignore_errors=True)
+        except OSError:
+            pass
+
+
 def install(core: str, *, fetcher=None, dest_root: str | None = None, plat: tuple[str, str] | None = None,
             progress: Callable[[int, int], None] | None = None, stop=None) -> dict:
     fetcher = fetcher or GitHubFetcher()
@@ -265,6 +281,7 @@ def install(core: str, *, fetcher=None, dest_root: str | None = None, plat: tupl
         dest_root = os.path.join(settings.data_dir(), "cores")
     core_dir = os.path.join(dest_root, core)
     os.makedirs(core_dir, exist_ok=True)
+    _sweep_stale(core_dir)
     work = tempfile.mkdtemp(prefix=".dl-", dir=core_dir)
     try:
         archive = os.path.join(work, "asset")

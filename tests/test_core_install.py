@@ -14,6 +14,7 @@ import stat
 import sys
 import tarfile
 import threading
+import time
 import zipfile
 
 import pytest
@@ -215,7 +216,7 @@ def test_an_archive_without_the_binary_is_refused_and_leaves_nothing(tmp_path):
     with pytest.raises(install.InstallError, match="does not contain"):
         run_install(tmp_path, "xray", fetcher_for("Xray-linux-64.zip", body))
     assert not (tmp_path / "cores" / "xray" / "v1.2.3").exists()
-    assert os.listdir(tmp_path / "cores" / "xray") == [] if (tmp_path / "cores" / "xray").exists() else True
+    assert os.listdir(tmp_path / "cores" / "xray") == []                      # the staging download is removed too
 
 
 def test_checksum_mismatch_missing_digest_and_bad_digest_are_refused(tmp_path):
@@ -397,3 +398,65 @@ def test_real_fetcher_parses_release_json(monkeypatch):
         monkeypatch.setattr(g, "_open", lambda url, accept, b=bad: FakeResponse(b))
         with pytest.raises(install.InstallError, match="unreadable"):
             g.release("XTLS/Xray-core")
+
+
+# ---------------------- real-release findings (Windows run): mihomo's member name, leaks, stale staging
+def test_mihomo_windows_zip_member_is_version_and_platform_suffixed(tmp_path):
+    """Real asset: mihomo-windows-amd64-v1.19.33.zip contains mihomo-windows-amd64.exe."""
+    body = make_zip({"mihomo-windows-amd64.exe": b"MZ-real"})
+    r = run_install(tmp_path, "mihomo", fetcher_for("mihomo-windows-amd64-v1.19.2.zip", body, "MetaCubeX/mihomo"), plat=("windows", "amd64"))
+    assert os.path.basename(r["path"]) == "mihomo.exe" and open(r["path"], "rb").read() == b"MZ-real"
+
+
+@pytest.mark.parametrize("member", ["mihomo-windows-amd64-v1.19.2.exe", "mihomo.exe", "mihomo"])
+def test_mihomo_member_name_variants(tmp_path, member):
+    body = make_zip({member: b"BIN", "README.md": b"r"})
+    r = run_install(tmp_path, "mihomo", fetcher_for("mihomo-windows-amd64-v1.19.2.zip", body, "MetaCubeX/mihomo"), plat=("windows", "amd64"))
+    assert open(r["path"], "rb").read() == b"BIN"
+
+
+def test_loose_member_names_do_not_match_other_programs(tmp_path):
+    body = make_zip({"mihomo-config.yaml": b"x", "notmihomo.exe": b"x", "mihomo.exe.sig": b"x", "docs/mihomo-notes.txt": b"x"})
+    with pytest.raises(install.InstallError, match="does not contain"):
+        run_install(tmp_path, "mihomo", fetcher_for("mihomo-windows-amd64-v1.19.2.zip", body, "MetaCubeX/mihomo"), plat=("windows", "amd64"))
+
+
+@pytest.mark.parametrize("make,asset_name", [(lambda: make_zip({"README.md": b"x"}), "Xray-linux-64.zip"),
+                                              (lambda: make_targz({"README.md": b"x"}), "sing-box-1.12.1-linux-amd64.tar.gz")])
+def test_archives_are_closed_before_cleanup(tmp_path, monkeypatch, make, asset_name):
+    """An open handle blocks deleting the staging folder on Windows (it leaked a 22 MB download)."""
+    opened = []
+    real_zip, real_tar = zipfile.ZipFile, tarfile.open
+
+    class Z(real_zip):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            opened.append(self)
+    monkeypatch.setattr(zipfile, "ZipFile", Z)
+
+    def T(*a, **k):
+        t = real_tar(*a, **k)
+        opened.append(t)
+        return t
+    monkeypatch.setattr(tarfile, "open", T)
+    core, repo = ("xray", "XTLS/Xray-core") if asset_name.startswith("Xray") else ("singbox", "SagerNet/sing-box")
+    with pytest.raises(install.InstallError):
+        run_install(tmp_path, core, fetcher_for(asset_name, make(), repo))
+    assert opened and all((o.fp is None) if isinstance(o, zipfile.ZipFile) else o.closed for o in opened)
+
+
+def test_stale_staging_folders_from_earlier_failures_are_swept(tmp_path):
+    core_dir = tmp_path / "cores" / "xray"
+    old = core_dir / ".dl-old"
+    fresh = core_dir / ".dl-fresh"
+    for d in (old, fresh):
+        d.mkdir(parents=True)
+        (d / "asset").write_bytes(b"x" * 10)
+    past = time.time() - 7200
+    os.utime(old, (past, past))
+    other = core_dir / "keep-me"                    # an old install of another version must never be swept
+    other.mkdir()
+    os.utime(other, (past, past))
+    run_install(tmp_path, "xray", fetcher_for("Xray-linux-64.zip", make_zip({"xray": SCRIPT})))
+    assert not old.exists()                        # an hour old: a dead earlier attempt
+    assert fresh.exists() and other.exists()       # recent (maybe a concurrent install) and unrelated folders stay

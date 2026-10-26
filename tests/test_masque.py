@@ -282,7 +282,8 @@ def test_auto_mode_switches_to_doh_only_when_the_system_resolver_is_fake(monkeyp
 
 @pytest.mark.parametrize("answers,expected", [
     (["198.18.0.7"], True), (["198.19.255.255"], True), (["203.0.113.9", "198.18.1.1"], True),
-    (["198.17.255.255"], False), (["198.20.0.0"], False), (["104.16.0.1"], False), (["2606:4700::1"], False), ([], False)])
+    (["127.165.0.8"], True), (["127.0.0.1"], True), (["240.0.0.5"], True), (["255.255.255.254"], True),
+    (["198.17.255.255"], False), (["10.0.0.5"], False), (["192.168.1.10"], False), (["198.20.0.0"], False), (["104.16.0.1"], False), (["2606:4700::1"], False), ([], False)])
 def test_fake_ip_detection(monkeypatch, answers, expected):
     import socket
     fam = lambda a: socket.AF_INET6 if ":" in a else socket.AF_INET

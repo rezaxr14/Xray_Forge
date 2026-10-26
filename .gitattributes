@@ -1,6 +1,10 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
+# Legal texts: byte-exact (a test pins LICENSE's hash), never converted to CRLF
+LICENSE text eol=lf
+NOTICE text eol=lf
+
 # Python files
 *.py text diff=python
 

@@ -116,3 +116,8 @@ def test_health_pipeline_can_now_start_a_core(tmp_path, monkeypatch):
                         lambda adapter, outs, binary=None: seen.update(binary=binary) or "CTX")
     assert hc._core_context(parse_target(VLESS_TLS_WS), "xray") == "CTX"
     assert seen["binary"] == exe
+
+
+def test_psiphon_slot_also_finds_the_tunnel_core_binary_name(tmp_path, monkeypatch):
+    names = discover.SPECS["psiphon"]["names"]
+    assert {"ConsoleClient", "psiphon-tunnel-core"} <= set(names)

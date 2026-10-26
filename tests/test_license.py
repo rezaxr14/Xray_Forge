@@ -19,8 +19,14 @@ def text(rel: str) -> str:
 
 
 def test_license_file_is_the_unmodified_apache_2_text():
-    data = (ROOT / "LICENSE").read_bytes()
+    data = (ROOT / "LICENSE").read_bytes().replace(b"\r\n", b"\n")      # a Windows checkout may convert line endings
     assert hashlib.sha256(data).hexdigest() == APACHE_2_SHA256
+
+
+def test_license_and_notice_are_pinned_to_lf_in_git():
+    attrs = text(".gitattributes")
+    for name in ("LICENSE", "NOTICE"):
+        assert re.search(rf"(?m)^{name}\s+text\s+eol=lf\s*$", attrs), name
 
 
 def test_notice_names_the_project_and_the_copyright_holder():

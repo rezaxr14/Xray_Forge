@@ -99,6 +99,15 @@ Still open from the review (next sprints):
   fake fetcher and a mutation-checked policy; **not** exercised against live GitHub, so the asset-name rules
   (Xray-*, sing-box-*, mihomo-*) are unverified (see runbook Job 4b). Psiphon is not downloadable (no official standalone
   build was verified).
+- ✅ **Real-release findings** (agent run on Windows, commit 981f8b5): downloads of xray v26.10.21, sing-box
+  v1.14.4 and sing-box-extended v1.14.3-extended-2.7.3 installed and ran with matching digests (the asset-name
+  rules are now verified for those three on Windows x64). mihomo failed because its zip member is
+  `mihomo-windows-amd64.exe`: fixed (member pattern). The failed install had left its download behind
+  because the archive stayed open (Windows can't delete it): archives are now closed first and stale `.dl-*`
+  staging folders older than an hour are swept. Fake-IP detection also treats loopback (127.x, seen as 127.165.0.x)
+  and 240.0.0.0/4 answers as fake. `LICENSE`/`NOTICE` are pinned to LF in `.gitattributes` and the license test
+  tolerates CRLF checkouts. Psiphon detection also looks for `psiphon-tunnel-core`. Linux/macOS asset names for
+  all four cores remain unverified.
 - ✅ `tools/live_check.py` + `docs/local-agent-runbook.md`: a redacted JSON report
   for env / masque / psiphon / vless throughput / warp-scan, and the jobs a local
   agent runs (locks, live checks, desktop build, shell hand-test). Offline tests

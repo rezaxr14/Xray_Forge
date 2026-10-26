@@ -50,16 +50,17 @@ FAKE_IP_PROBES = ("api.cloudflareclient.com", "cloudflare.com", "example.com")  
 
 def system_dns_is_fake() -> bool:
     """True when the system resolver answers with fake-IP addresses (198.18.0.0/15),
-    as TUN-mode proxies do; a core that resolves that way connects to dead addresses."""
+    as TUN-mode proxies do (or loopback / reserved ones); a core that resolves that way connects to dead addresses."""
     import ipaddress
     import socket
-    net = ipaddress.ip_network("198.18.0.0/15")
+    # fake-IP ranges: the usual 198.18.0.0/15, loopback (some resolvers answer 127.x) and 240.0.0.0/4 (reserved)
+    nets = [ipaddress.ip_network(n) for n in ("198.18.0.0/15", "127.0.0.0/8", "240.0.0.0/4")]
     for name in FAKE_IP_PROBES:               # split DNS can answer some names for real and others fake
         try:
             infos = socket.getaddrinfo(name, 443, socket.AF_INET, socket.SOCK_STREAM)
         except OSError:
             continue
-        if any(ipaddress.ip_address(i[4][0]) in net for i in infos):
+        if any(any(ipaddress.ip_address(i[4][0]) in n for n in nets) for i in infos):
             return True
     return False
 

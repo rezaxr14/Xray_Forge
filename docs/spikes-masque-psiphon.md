@@ -40,7 +40,7 @@ UI behind core detection, exactly like `supports()` does for XHTTP today.
 
 Blockers: the official build and config values come from Psiphon Labs, and
 psiphon-tunnel-core is GPL-3.0, so shipping or embedding it is a licensing
-decision for the project owner (the project itself is Apache-2.0).
+decision for the project owner (the project itself is GPL-3.0-only).
 
 **Update:** implemented as bring-your-own (`core/psiphon.py`): the user supplies
 the `ConsoleClient` binary and their own config; we rewrite local ports and the

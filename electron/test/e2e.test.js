@@ -322,7 +322,7 @@ test('About tab shows the real version, the license and https links that open ou
     await page.waitForFunction(() => !document.querySelector('#tab-about').hidden);
     await page.waitForFunction((v) => document.querySelector('#ab-version').textContent.includes(v), info.version);
     const text = await page.locator('#tab-about').innerText();
-    assert.match(text, /Apache-2\.0/);
+    assert.match(text, /GPL-3\.0/);
     assert.match(text, new RegExp(`protocol ${info.protocol}`));
     assert.match(text, /separate programs/i);                              // cores are not part of this app
     const links = await page.$$eval('#tab-about a', (as) => as.map((a) => ({ href: a.href, target: a.target, rel: a.rel })));

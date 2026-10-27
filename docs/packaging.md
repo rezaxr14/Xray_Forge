@@ -102,7 +102,7 @@ are fixed; `tools/check_version.py --package` now reads the version from files.
   `build/` is gitignored. electron-builder reads them via
   `directories.buildResources`; the window uses the PNG at runtime. Not yet
   seen in a built installer: nobody has launched one.
-* Release archives and installers ship `LICENSE` and `NOTICE` (Apache-2.0); the
+* Release archives and installers ship `LICENSE` and `NOTICE` (GPL-3.0-only); the
   desktop job stages them into `electron/legal/` for `extraResources`.
 
 ## Still open

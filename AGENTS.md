@@ -12,8 +12,8 @@ fake SNI, domain fronting, and a local MITM-DomainFronting config generator.
 It ships an Electron desktop app (UI over the Python engine, JSON-RPC on stdio;
 see `docs/engine-api.md`) and a fully headless CLI. The Tkinter GUI is retired.
 
-License: **Apache-2.0**. Do not paste GPL-licensed code into this repo
-(see *Licensing constraints* below).
+License: **GPL-3.0-only** (relicensed from Apache-2.0 by the owner). Read *Licensing
+constraints* below before adding or copying any code.
 
 ## Commands
 
@@ -133,18 +133,23 @@ tests/                   pytest suite (offline; see Testing rules)
 
 ## Licensing constraints (important)
 
-- This repo is Apache-2.0. **Never copy code from GPL-licensed projects**
-  (patterniha/*): GPL code cannot be combined into an Apache-2.0 work without
-  relicensing the whole project. Xray-core is Apache-2.0 and fine to *read*
-  for API shape. Keep `LICENSE` byte-identical to the official text (a test
-  checks its hash) and keep `NOTICE` shipped with every release archive.
-- External cores and tools (xray, sing-box, mihomo, sing-box-extended, Psiphon's
-  `ConsoleClient`) are **separate programs the user supplies**; we spawn them and
-  never link or copy their code, so their licences (some GPL-3.0) do not apply to
-  this repo. Bundling one in an installer is a separate licensing decision.
-- Techniques are re-implemented from public documentation. When implementing
-  from an upstream repo, write original code and note the documented source
-  in the docstring (see `core/domainfront.py` for the pattern).
+- This repo is **GPL-3.0-only**. `LICENSE` is the official text, byte-identical (a test checks its
+  hash); keep `NOTICE` shipped with every release archive and installer. Distributed binaries must
+  point at the source (NOTICE does).
+- Code under a GPL-3.0-compatible license (MIT, BSD, Apache-2.0, GPL-3.0) may be incorporated with
+  its copyright and license notices kept. Never copy code under a GPL-incompatible license
+  (proprietary, "non-commercial only", GPL-2.0-only, unlicensed). When unsure of an upstream's
+  license, read its LICENSE file first and say so in the commit message.
+- External cores and tools (xray, sing-box, mihomo, sing-box-extended, Psiphon's `ConsoleClient`) are
+  **separate programs the user supplies**; we spawn them and never link or copy their code, so their
+  licenses do not apply to this repo. Bundling one in an installer is a separate licensing decision.
+- Remote data (for example the Patterniha-F free-config list) is fetched at the user's request and
+  is never copied into the repo or an installer.
+- Out of scope, do not build or reword: the SNI-spoofing / raw fake-packet helper (declined by the
+  maintainer's safety review). The non-encrypted VLESS/Trojan "public-address" mode needs a written
+  spec from the maintainer first.
+- Write original code and note the documented source in the docstring when implementing a technique
+  from an upstream project (see `core/domainfront.py` for the pattern).
 
 ## Security notes
 

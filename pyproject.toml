@@ -7,9 +7,9 @@ name = "xray-forge"
 version = "2.1.0"
 description = "Full Xray config utility, tester, bridge, IP finder, subscription health-checker"
 readme = "README.md"
-license = {text = "Apache-2.0"}
+license = {text = "GPL-3.0-only"}
 classifiers = [
-    "License :: OSI Approved :: Apache Software License",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
 ]
 authors = [{ name = "Xray Forge Contributors" }]
 # 3.10+ required: the codebase uses PEP 604 unions at runtime

@@ -49,7 +49,7 @@ Still open from the review (next sprints):
     remembered via `ui.settings_*`. Verified by Playwright e2e against the real
     engine (what is sent, engine validation messages, restart); not exercised:
     a scan or check that actually hits a timeout on a real network.
-- ✅ License: Apache-2.0 (relicensed; the sole author agreed). `LICENSE` is the official text,
+- ✅ License: **GPL-3.0-only** (relicensed from Apache-2.0 on 2026-10-27 at the owner's request). `LICENSE` is the official text,
   `NOTICE` and the package metadata agree (`tests/test_license.py`); release
   archives and installers ship both files.
 - ⛔ SNI-spoofing helper: out of scope for this project's assistant-built work; not built.
@@ -62,8 +62,8 @@ Still open from the review (next sprints):
 - ✅ Psiphon (bring your own): `core/psiphon.py`, `psiphon.*` engine methods and
   `xray_forge psiphon status|probe` run the user's `ConsoleClient` and their own
   Psiphon Labs config as a separate process, on a private rewritten config copy.
-  Nothing from Psiphon is bundled or invented, so the project stays Apache-2.0
-  (GPL-3.0 applies to their binary, not to this code). Tested with a fake client;
+  Nothing from Psiphon is bundled or invented, so nothing of theirs is
+  copied into this GPL-3.0 code base (their binary stays a separate program). Tested with a fake client;
   **not** exercised: the real client or network. Whether to *bundle* the binary
   is the owner's licensing call (would need GPL source-offer terms for it).
 - ✅ MASQUE DNS/interface defaults from a real-machine report: on a TUN/fake-IP
@@ -176,7 +176,7 @@ See `docs/engine-api.md`.
     accepts and never answers. Not re-checked on a real tunnel.
   - ✅ `.gitattributes` pins `*.sh` to LF (a CRLF checkout broke `tools/update_locks.sh`
     under WSL).
-- ✅ About tab: version and engine protocol (from `engine.info`), license (Apache-2.0), project and
+- ✅ About tab: version and engine protocol (from `engine.info`), license (GPL-3.0), project and
   issue links, and a note that cores are separate programs. Links are https, `target=_blank`,
   `rel="noopener noreferrer"`: `test/links.test.js` checks every link in the page, an e2e test
   checks the tab in the real renderer, and `app-shell.test.js` already covers the main-process
@@ -398,10 +398,10 @@ pass latency checks while being unusable.
 
 ## Risks / decisions to keep in view
 
-- **Licensing**: patterniha repos are GPL-3.0; Xray Forge is Apache-2.0.
-  Everything from those projects is re-implemented from documented behavior
-  (`AGENTS.md` → Licensing constraints). If GPL code is ever required, the
-  project must relicense first.
+- **Licensing**: Xray Forge is GPL-3.0-only since 2026-10-27, so GPL-3.0-compatible upstream code
+  may now be reused with its notices (`AGENTS.md` → Licensing constraints), after reading that
+  upstream's actual LICENSE file. Reuse still needs a written spec and a real upstream source to read;
+  the SNI-spoofing helper stays declined.
 - **External-core features** (MASQUE, Psiphon) depend on cores that may not
   support them yet — verify upstream before designing.
 - **WARP API is undocumented** and can change without notice; registration

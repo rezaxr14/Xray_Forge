@@ -144,12 +144,14 @@ them (with SHA-256 checksums) to a GitHub Release.
 
 ## 📄 License
 
-Xray Forge is licensed under the **Apache License, Version 2.0**.
+Xray Forge is free software, licensed under the **GNU General Public License, version 3**
+(`GPL-3.0-only`).
 
-You may use, modify and distribute it, including commercially, as long as you
-keep the license and the [`NOTICE`](NOTICE) file, state significant changes, and
-do not use the project's name to endorse derived products. The license also
-grants a patent license from contributors.
+You may use, study, modify and share it, including commercially, as long as anything you
+distribute (modified or not, source or binary) stays under the same license, comes with its
+source code, and keeps the copyright and license notices ([`NOTICE`](NOTICE)). There is no
+warranty. The proxy cores the app can launch (Xray-core, sing-box, mihomo, Psiphon, ...) are
+separate programs with their own licenses.
 
 See [`LICENSE`](LICENSE) for the full legal text.
 

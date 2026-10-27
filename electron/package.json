@@ -4,7 +4,7 @@
   "private": true,
   "description": "Electron front end for the Xray Forge Python engine",
   "main": "main.js",
-  "license": "Apache-2.0",
+  "license": "GPL-3.0-only",
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",

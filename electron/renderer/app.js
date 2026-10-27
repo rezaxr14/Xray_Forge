@@ -1127,6 +1127,7 @@ $('#sn-save').addEventListener('click', () => guarded($('#sn-status'), () => sav
   try {
     state.info = await window.forge.call('engine.info', {});
     $('#engine-status').textContent = `engine v${state.info.version} · ${state.info.cores.length} cores`;
+    $('#ab-version').textContent = `Version ${state.info.version} · engine protocol ${state.info.protocol}`;
     cv.defaults = state.info.defaults;
     cvResetRules();
     $('#cv-keys').textContent = (state.info.template_keys || []).map((k) => `{${k}}`).join(' ');

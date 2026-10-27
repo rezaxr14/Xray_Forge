@@ -314,6 +314,34 @@ test('MITM tab builds a config, shows the guide and generates a constrained CA',
   } finally { await close(); }
 });
 
+test('About tab shows the real version, the license and https links that open outside the app', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    const info = await page.evaluate(() => window.forge.call('engine.info', {}));
+    await page.click('[data-tab=about]');
+    await page.waitForFunction(() => !document.querySelector('#tab-about').hidden);
+    await page.waitForFunction((v) => document.querySelector('#ab-version').textContent.includes(v), info.version);
+    const text = await page.locator('#tab-about').innerText();
+    assert.match(text, /Apache-2\.0/);
+    assert.match(text, new RegExp(`protocol ${info.protocol}`));
+    assert.match(text, /separate programs/i);                              // cores are not part of this app
+    const links = await page.$$eval('#tab-about a', (as) => as.map((a) => ({ href: a.href, target: a.target, rel: a.rel })));
+    assert.ok(links.length >= 2);
+    for (const l of links) {
+      assert.match(l.href, /^https:\/\//);
+      assert.equal(l.target, '_blank');
+      assert.match(l.rel, /noopener/);
+      assert.match(l.rel, /noreferrer/);
+    }
+    assert.ok(links.some((l) => l.href === 'https://github.com/rezaxr14/Xray_Forge'));
+    // other tabs hide again, and the about panel never uses inline styles (CSP)
+    await page.click('[data-tab=configs]');
+    assert.equal(await page.locator('#tab-about').isHidden(), true);
+    assert.equal(await page.locator('#tab-about [style]').count(), 0);
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
 test('Cores tab detects, validates and saves a core path', opts, async () => {
   const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path');
   if (process.platform === 'win32') return;

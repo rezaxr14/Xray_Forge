@@ -166,16 +166,22 @@ See `docs/engine-api.md`.
     3.10/3.12/3.13/3.15 x ubuntu/windows) installed from the locks and passed; local
     hash installs on 3.12 and 3.15. Caveat: PyYAML 6.0.3 has no cp315 wheel, so 3.15 builds
     it from the (hash-pinned) sdist and needs a C toolchain on the runner.
-  - 🟡 4.4 CI image pin: `ubuntu-latest` became Ubuntu 26.04 on 2026-10-19 and Playwright
-    1.56.0 cannot `--with-deps` there, so the e2e job failed on the runner (it passes on
-    24.04 locally). The `ui` job now runs on `ubuntu-24.04`, and `check_workflows.py`
-    rejects a Playwright browser install on any `*-latest` runner. **Not yet confirmed on a
-    runner**: needs the next CI run. Moving to a newer Playwright on 26.04 stays open.
+  - ✅ 4.4 CI image pin: `ubuntu-latest` became Ubuntu 26.04 on 2026-10-19 and Playwright
+    1.56.0 cannot `--with-deps` there, so the e2e job failed on the runner (it passed on
+    24.04 locally). The `ui` job now runs on `ubuntu-24.04` (maintainer reports the CI run
+    green after the change), and `check_workflows.py` rejects a Playwright browser install
+    on any `*-latest` runner. Moving to a newer Playwright on 26.04 stays open.
   - ✅ MASQUE/Psiphon/any SOCKS-probe cancel now also works while the page fetch is in flight
     (it used to wait out the timeout once the port was open); tested with a fake core that
     accepts and never answers. Not re-checked on a real tunnel.
   - ✅ `.gitattributes` pins `*.sh` to LF (a CRLF checkout broke `tools/update_locks.sh`
     under WSL).
+- ✅ About tab: version and engine protocol (from `engine.info`), license (Apache-2.0), project and
+  issue links, and a note that cores are separate programs. Links are https, `target=_blank`,
+  `rel="noopener noreferrer"`: `test/links.test.js` checks every link in the page, an e2e test
+  checks the tab in the real renderer, and `app-shell.test.js` already covers the main-process
+  handler (https only, `shell.openExternal`). **Not clicked in a packaged Electron app** (that would open
+  the browser): do it once by hand.
 - ✅ Cores tab: detect xray/sing-box/mihomo (saved path, env, v2rayN, ./bin, PATH), set/clear path; `health.run` explains a missing core.
 - ✅ Step 5: reach parity with the Tk GUI, then retire it (`app.py`, `ui/`,
   GUI tests, CI steps). In order:

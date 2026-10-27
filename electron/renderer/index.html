@@ -22,6 +22,7 @@
       <button role="tab" data-tab="bridges" aria-selected="false">MASQUE / Psiphon</button>
       <button role="tab" data-tab="mitm" aria-selected="false">MITM fronting</button>
       <button role="tab" data-tab="cores" aria-selected="false">Cores</button>
+      <button role="tab" data-tab="about" aria-selected="false">About</button>
     </nav>
     <span id="settings-msg" class="bad-text small" role="status"></span>
     <span id="engine-status" class="muted" aria-live="polite">engine: connecting…</span>
@@ -531,6 +532,19 @@
         <span id="mt-ca-status" class="muted"></span>
       </div>
       <textarea id="mt-out" rows="14" readonly spellcheck="false" placeholder="Config or guide appears here"></textarea>
+    </section>
+    <section id="tab-about" class="tab" role="tabpanel" hidden>
+      <h2>Xray Forge</h2>
+      <p id="ab-version" class="muted" role="status">engine: connecting…</p>
+      <p>A config editor, converter and scanner for Xray, sing-box and mihomo. The interface runs on
+        an Electron shell; everything else is done by a local Python engine on this computer.</p>
+      <p>Licensed under <strong>Apache-2.0</strong>. Source code, releases and bug reports:</p>
+      <ul>
+        <li><a href="https://github.com/rezaxr14/Xray_Forge" target="_blank" rel="noopener noreferrer">Project on GitHub</a></li>
+        <li><a href="https://github.com/rezaxr14/Xray_Forge/issues" target="_blank" rel="noopener noreferrer">Report a problem</a></li>
+      </ul>
+      <p class="muted">Proxy cores (xray, sing-box, mihomo, sing-box-extended, Psiphon) are separate programs with their own
+        licenses. Xray Forge starts them but does not include or modify them. Links open in your default browser.</p>
     </section>
   </main>
   <script src="app.js"></script>

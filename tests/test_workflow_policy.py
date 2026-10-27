@@ -292,6 +292,62 @@ def test_pip_cache_may_list_several_lock_files():
                   "            requirements.lock\n            requirements-ci.lock\n") == []
 
 
+# ---- browser-install jobs must not float on a runner image ---------------------------
+
+PW_RUN = "npx playwright install --with-deps chromium"
+
+
+def _pw(runs_on: str, run: str = PW_RUN) -> list[str]:
+    block = "|\n" + "".join(f"          {ln}\n" for ln in run.splitlines())
+    text = GOOD.replace("runs-on: ubuntu-latest", f"runs-on: {runs_on}").replace("run: echo hi\n", f"run: {block}")
+    return [e for e in errs(text) if "playwright" in e.lower()]
+
+
+@pytest.mark.parametrize("runs_on", ["ubuntu-24.04", "ubuntu-22.04", "windows-2022", "[self-hosted, linux]",
+                                     "ubuntu-24.04-latestish", "ubuntu-24.04-arm"])
+def test_pinned_runner_may_install_playwright_browsers(runs_on):
+    assert _pw(runs_on) == []
+
+
+@pytest.mark.parametrize("runs_on", ["ubuntu-latest", "windows-latest", "macos-latest", "ubuntu-slim-latest",
+                                     "ubuntu-latest-8-cores", "latest"])
+def test_playwright_browser_install_on_a_floating_runner_is_flagged(runs_on):
+    out = _pw(runs_on)
+    assert len(out) == 1 and "-latest" in out[0] and "ubuntu-24.04" in out[0], out
+
+
+def test_floating_runner_is_fine_when_no_browser_is_installed():
+    assert _pw("ubuntu-latest", "npm test") == []
+    assert _pw("ubuntu-latest", "npm install --no-save playwright@1.56.0") == []
+
+
+def test_playwright_install_is_found_in_any_form():
+    for run in ["npx playwright install chromium", "python -m playwright install --with-deps",
+                "playwright install\necho done", "npx  playwright  install-deps"]:
+        assert _pw("ubuntu-latest", run), run
+
+
+def test_matrix_runner_for_playwright_is_flagged_when_it_can_float(tmp_path):
+    text = GOOD.replace("runs-on: ubuntu-latest",
+                        "runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n        os: [ubuntu-latest]"
+                        ).replace("run: echo hi", "run: " + PW_RUN)
+    assert any("playwright" in e.lower() for e in errs("defaults:\n  run:\n    shell: bash\n" + text))
+
+
+def test_matrix_include_runners_are_checked_too():
+    wf = GOOD.replace("runs-on: ubuntu-latest",
+                      "runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n        include:\n"
+                      "          - os: ubuntu-24.04\n          - os: windows-latest"
+                      ).replace("run: echo hi", "run: " + PW_RUN)
+    out = [e for e in errs("defaults:\n  run:\n    shell: bash\n" + wf) if "playwright" in e.lower()]
+    assert len(out) == 1 and "windows-latest" in out[0] and "ubuntu-24.04" not in out[0].split("floating runner")[1].split(";")[0], out
+
+
+def test_shell_scripts_are_pinned_to_lf_line_endings():
+    attrs = (ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
+    assert "*.sh text eol=lf" in [ln.strip() for ln in attrs]
+
+
 # ---- repo-level consistency ---------------------------------------------------
 
 def _repo(tmp_path, *, release=None, pkg=None, lock=None):

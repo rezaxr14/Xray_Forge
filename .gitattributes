@@ -5,6 +5,9 @@
 LICENSE text eol=lf
 NOTICE text eol=lf
 
+# Shell scripts run under bash on every OS (and WSL): CRLF breaks `set -o pipefail`
+*.sh text eol=lf
+
 # Python files
 *.py text diff=python
 

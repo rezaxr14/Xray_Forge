@@ -23,6 +23,8 @@ GitHub runner; it catches the mistakes that are cheap to catch offline:
   runs on tags after both builds; the tag check runs in both build jobs;
 * ``electron/package-lock.json`` is in sync with ``electron/package.json``
   (``npm ci`` fails otherwise);
+* a job that installs Playwright browsers runs on a pinned runner image (``ubuntu-24.04``),
+  never a floating ``*-latest`` label (a new image can break ``--with-deps`` overnight);
 * every ``pip install`` is hash-locked: ``pip install --require-hashes -r X.lock``
   (the project itself only as ``pip install --no-deps -e .``, pip itself only as
   ``pip install --upgrade pip``), and a ``cache: pip`` step is keyed on lock files;
@@ -108,6 +110,22 @@ def _run_texts(doc) -> list[tuple[str, str]]:
             if isinstance(step.get("run"), str):
                 out.append((f"{jname}/{step.get('name') or i}", step["run"]))
     return out
+
+
+def _job_runs(jname: str, job) -> list[tuple[str, str]]:
+    return [(f"{jname}/{st.get('name') or i}", st["run"]) for i, st in enumerate(_steps(job))
+            if isinstance(st.get("run"), str)]
+
+
+def _runner_labels(job) -> list[str]:
+    """Runner labels a job can land on, expanding ``${{ matrix.os }}`` into the matrix values."""
+    labels = [x for x in _walk_strings(job.get("runs-on")) if "${{" not in x]
+    if "matrix.os" in " ".join(_walk_strings(job.get("runs-on"))):
+        matrix = (job.get("strategy") or {}).get("matrix") or {}
+        oses = matrix.get("os")
+        labels += [str(o) for o in (oses if isinstance(oses, list) else [oses] if oses else [])]
+        labels += [str(e["os"]) for e in matrix.get("include") or [] if isinstance(e, dict) and "os" in e]
+    return labels
 
 
 def _walk_strings(value):
@@ -216,6 +234,15 @@ def check_workflow_text(text: str, name: str) -> list[str]:
             if not (exact and "--no-save" in flags):
                 errs.append(f"{name}: {label}: 'npm install{m.group(1).rstrip()}' floats versions; use 'npm ci' "
                             "(or '--no-save pkg@X.Y.Z' for a tool that is not a dependency)")
+
+    # -- browser installs need a pinned runner image ----------------------------------------------
+    for jname, job in _jobs(doc).items():
+        if not any(re.search(r"\bplaywright\s+install", script) for _l, script in _job_runs(jname, job)):
+            continue
+        floating = sorted(lbl for lbl in _runner_labels(job) if re.search(r"(?:^|-)latest(?:$|-)", lbl))
+        if floating:
+            errs.append(f"{name}: job '{jname}' installs Playwright browsers on floating runner {', '.join(floating)}; "
+                        "pin the image (e.g. ubuntu-24.04): a new -latest image can break 'playwright install --with-deps'")
 
     # -- pip: only hash-locked installs ---------------------------------------------------------
     for label, args, ok, _files in _pip_installs(doc):

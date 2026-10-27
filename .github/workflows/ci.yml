@@ -78,7 +78,9 @@ jobs:
 
   ui:
     name: Electron UI (e2e)
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: Playwright's --with-deps needs a dependency map for the
+    # image, and 1.56.0 has none for Ubuntu 26.04 (what ubuntu-latest became on 2026-10-19).
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout

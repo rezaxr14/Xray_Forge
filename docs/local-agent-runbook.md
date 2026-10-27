@@ -44,7 +44,7 @@ Job 1b checks that). Run this job only when the maintainer asks for new locks.
 
 CI and the release build now install only from the hash-pinned locks. This job proves those exact
 commands work on a real machine, before a runner is asked to. Use a **new, empty virtual environment
-for each Python you have** (3.10, 3.12 and 3.13 are the CI matrix; any subset is useful):
+for each Python you have** (3.10, 3.12, 3.13 and 3.15 are the CI matrix; any subset is useful):
 
     python -m venv .venv-lock && .venv-lock/Scripts/activate      # Linux/macOS: source .venv-lock/bin/activate
     python -m pip install --upgrade pip

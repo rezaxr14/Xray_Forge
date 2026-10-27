@@ -43,7 +43,7 @@ cd electron && npm test
 ```
 
 CI (`.github/workflows/ci.yml`) runs on ubuntu-latest and windows-latest ×
-Python 3.10/3.12/3.13, always with **bash** as the shell (PowerShell cannot
+Python 3.10/3.12/3.13/3.15, always with **bash** as the shell (PowerShell cannot
 expand `*.py` globs or run heredocs — never add `shell: pwsh` steps or
 heredocs outside a `bash` default). It compiles, lints, runs pytest, then
 CLI and GUI smoke tests.

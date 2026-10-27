@@ -158,14 +158,24 @@ See `docs/engine-api.md`.
     (packaging, checksums, GPG signing, version choice).
   - ✅ 4.3 App icons (`electron/assets`, generator `tools/make_icons.py`) wired
     into electron-builder and the window; unverified in a real installer.
-  - 🟡 4.2 Python lock files: generated on the maintainer's machine and committed;
-    `ci.yml` / `release.yml` now install with `pip install --require-hashes -r
-    requirements-ci.lock` (project: `--no-deps --no-build-isolation -e .`, pip cache keyed
-    on the lock). `tools/check_workflows.py` makes any other `pip install` an error and
-    checks the locks against `requirements.txt` / `requirements-ci.in` (hashes present,
-    versions satisfy the specifiers, both locks agree). **Not yet run on a real runner
-    or with real PyPI**: runbook Job 1b (fresh venv on Windows py3.10/3.12/3.13) first,
-    then the first CI run.
+  - ✅ 4.2 Python lock files: `ci.yml` / `release.yml` install with `pip install
+    --require-hashes -r requirements-ci.lock` (project: `--no-deps --no-build-isolation -e .`,
+    pip cache keyed on the lock). `tools/check_workflows.py` makes any other `pip install`
+    an error and checks the locks against `requirements.txt` / `requirements-ci.in`.
+    **Run for real** (maintainer's agent, CI run 40554948660): all 8 test jobs (Python
+    3.10/3.12/3.13/3.15 x ubuntu/windows) installed from the locks and passed; local
+    hash installs on 3.12 and 3.15. Caveat: PyYAML 6.0.3 has no cp315 wheel, so 3.15 builds
+    it from the (hash-pinned) sdist and needs a C toolchain on the runner.
+  - 🟡 4.4 CI image pin: `ubuntu-latest` became Ubuntu 26.04 on 2026-10-19 and Playwright
+    1.56.0 cannot `--with-deps` there, so the e2e job failed on the runner (it passes on
+    24.04 locally). The `ui` job now runs on `ubuntu-24.04`, and `check_workflows.py`
+    rejects a Playwright browser install on any `*-latest` runner. **Not yet confirmed on a
+    runner**: needs the next CI run. Moving to a newer Playwright on 26.04 stays open.
+  - ✅ MASQUE/Psiphon/any SOCKS-probe cancel now also works while the page fetch is in flight
+    (it used to wait out the timeout once the port was open); tested with a fake core that
+    accepts and never answers. Not re-checked on a real tunnel.
+  - ✅ `.gitattributes` pins `*.sh` to LF (a CRLF checkout broke `tools/update_locks.sh`
+    under WSL).
 - ✅ Cores tab: detect xray/sing-box/mihomo (saved path, env, v2rayN, ./bin, PATH), set/clear path; `health.run` explains a missing core.
 - ✅ Step 5: reach parity with the Tk GUI, then retire it (`app.py`, `ui/`,
   GUI tests, CI steps). In order:

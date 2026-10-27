@@ -18,6 +18,7 @@ import json
 import os
 import socket
 import subprocess
+import threading
 import tempfile
 import time
 from typing import Any
@@ -189,13 +190,33 @@ def run_socks_probe(core: "CoreAdapter", binary: str, cfg: dict[str, Any],
             log.warning("core did not open socks port %s: %s", socks_port, res["status"])
             return res
         from xray_forge.core.probe import ProbeError
-        try:
-            ms, status, body = fetch_via_socks("127.0.0.1", socks_port, test_host, 80,
-                                               "/json?fields=status,countryCode,country,city,isp,query",
-                                               timeout=timeout)
-        except ProbeError as pe:
-            res["status"] = f"core: {pe.detail[:50]}"
-            return res
+        # The fetch runs in a worker so ``stop`` is honoured while it is in flight (a tunnel that
+        # accepts but never answers used to hold a cancelled job for the whole timeout).  On cancel
+        # we return at once; ``finally`` kills the core, which resets the socket and ends the worker.
+        box: dict[str, Any] = {}
+
+        def _fetch() -> None:
+            try:
+                box["ok"] = fetch_via_socks("127.0.0.1", socks_port, test_host, 80,
+                                            "/json?fields=status,countryCode,country,city,isp,query",
+                                            timeout=timeout)
+            except BaseException as exc:  # noqa: BLE001 - re-raised below in the caller's thread
+                box["err"] = exc
+
+        worker = threading.Thread(target=_fetch, name="socks-probe-fetch", daemon=True)
+        worker.start()
+        while worker.is_alive():
+            worker.join(0.1)
+            if stop is not None and stop.is_set() and "ok" not in box and "err" not in box:
+                res["status"] = "cancelled"
+                return res
+        if "err" in box:
+            exc = box["err"]
+            if isinstance(exc, ProbeError):
+                res["status"] = f"core: {exc.detail[:50]}"
+                return res
+            raise exc
+        ms, status, body = box["ok"]
         res["real"] = ms
         try:
             d = json.loads(body.decode("utf-8", "replace"))

@@ -60,6 +60,7 @@ if cmd == "run":
             else: c.recv(18)
             c.sendall(b"\\x05\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00")
             c.recv(4096)
+            time.sleep(float(os.environ.get("FAKE_STALL", "0")))      # a tunnel that accepts but never answers
             c.sendall(b"HTTP/1.1 200 OK\\r\\nContent-Length: %d\\r\\nConnection: close\\r\\n\\r\\n" % len(body) + body)
         finally:
             c.close()
@@ -75,6 +76,7 @@ def core(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_LOG", str(log))
     monkeypatch.delenv("FAKE_MODE", raising=False)
     monkeypatch.delenv("FAKE_DELAY", raising=False)
+    monkeypatch.delenv("FAKE_STALL", raising=False)
 
     class C:
         binary = path
@@ -251,6 +253,34 @@ def test_probe_can_be_cancelled_while_the_core_is_still_starting(core, monkeypat
     r = masque.probe(core.binary, masque.MasqueOptions(), timeout=3.0, start_timeout=60.0, stop=stop)
     assert time.monotonic() - t0 < 10
     assert r["real"] is None and "cancel" in r["status"]
+
+
+def test_probe_can_be_cancelled_while_the_page_fetch_is_in_flight(core, monkeypatch):
+    """Cancel used to be checked only while waiting for the port; a stalled tunnel held the job for the whole timeout."""
+    import threading
+    import time
+    monkeypatch.setenv("FAKE_STALL", "60")
+    stop = threading.Event()
+    threading.Timer(1.5, stop.set).start()          # well after the port is open, during the fetch
+    t0 = time.monotonic()
+    r = masque.probe(core.binary, masque.MasqueOptions(), timeout=40.0, start_timeout=30.0, stop=stop)
+    elapsed = time.monotonic() - t0
+    assert elapsed < 10, elapsed
+    assert r["real"] is None and "cancel" in r["status"], r
+
+
+def test_a_stalled_fetch_without_cancel_still_times_out_normally(core, monkeypatch):
+    monkeypatch.setenv("FAKE_STALL", "60")
+    r = masque.probe(core.binary, masque.MasqueOptions(), timeout=1.5, start_timeout=30.0)
+    assert r["real"] is None and r["status"].startswith("core:"), r
+
+
+def test_cancel_after_a_finished_fetch_does_not_discard_the_result(core):
+    import threading
+    stop = threading.Event()
+    r = masque.probe(core.binary, masque.MasqueOptions(), timeout=3.0, stop=stop)
+    stop.set()
+    assert r["status"] == "core ok" and r["cc"] == "DE"
 
 
 # ------------------------------------------------- DNS and interface binding

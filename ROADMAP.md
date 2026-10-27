@@ -158,9 +158,14 @@ See `docs/engine-api.md`.
     (packaging, checksums, GPG signing, version choice).
   - ✅ 4.3 App icons (`electron/assets`, generator `tools/make_icons.py`) wired
     into electron-builder and the window; unverified in a real installer.
-  - ⬜ 4.2 Python lock file: `requirements-ci.in` and `tools/update_locks.sh`
-    exist, but no lock was generated (no PyPI in the sandbox). Run the script,
-    commit the locks, switch the workflows to `--require-hashes`.
+  - 🟡 4.2 Python lock files: generated on the maintainer's machine and committed;
+    `ci.yml` / `release.yml` now install with `pip install --require-hashes -r
+    requirements-ci.lock` (project: `--no-deps --no-build-isolation -e .`, pip cache keyed
+    on the lock). `tools/check_workflows.py` makes any other `pip install` an error and
+    checks the locks against `requirements.txt` / `requirements-ci.in` (hashes present,
+    versions satisfy the specifiers, both locks agree). **Not yet run on a real runner
+    or with real PyPI**: runbook Job 1b (fresh venv on Windows py3.10/3.12/3.13) first,
+    then the first CI run.
 - ✅ Cores tab: detect xray/sing-box/mihomo (saved path, env, v2rayN, ./bin, PATH), set/clear path; `health.run` explains a missing core.
 - ✅ Step 5: reach parity with the Tk GUI, then retire it (`app.py`, `ui/`,
   GUI tests, CI steps). In order:

@@ -179,14 +179,117 @@ def test_reproducible_npm_commands_are_allowed(cmd):
     assert errs(GOOD.replace("echo hi", cmd)) == []
 
 
-def test_unpinned_pip_installs_are_advisory_only():
-    text = GOOD.replace("      - run: echo hi\n", (
-        "      - run: |\n"
-        "          python -m pip install --upgrade pip\n"
-        "          pip install -r requirements.txt pyinstaller 'x==1.0' -e .\n"))
-    assert errs(text) == []
-    adv = cw.advisories_text(textwrap.dedent(text), "t.yml")
-    assert len(adv) == 1 and "pyinstaller" in adv[0], adv
+# ---- pip: only hash-locked installs ----------------------------------------------
+
+def _pip(cmd: str) -> list[str]:
+    """Policy errors that mention pip for a workflow whose single run step is ``cmd``."""
+    body = "      - run: |\n" + "".join(f"          {ln}\n" for ln in cmd.splitlines())
+    return [e for e in errs(GOOD.replace("      - run: echo hi\n", body)) if "pip" in e]
+
+
+@pytest.mark.parametrize("cmd", [
+    "pip install --require-hashes -r requirements-ci.lock",
+    "python -m pip install --require-hashes -r requirements.lock",
+    "python3 -m pip install --require-hashes --no-deps -r requirements-ci.lock",
+    "pip3 install -r requirements-ci.lock --require-hashes",
+    "pip install --require-hashes \\\n  -r requirements-ci.lock",       # backslash continuation
+    "pip install --no-deps --no-build-isolation -e .",
+    "pip install --no-build-isolation --no-deps .",
+    "python -m pip install --upgrade pip",
+    "python -m pip install --upgrade pip\npip install --require-hashes -r requirements-ci.lock\npip install --no-deps --no-build-isolation -e .",
+    "pip --version",
+    "pip install --require-hashes -r requirements-ci.lock && echo done",     # stops at the shell operator
+    "pip install --require-hashes -r requirements-ci.lock | tee pip.log",
+    "pip install --require-hashes -r requirements-ci.lock; python -m pytest tests",
+    "pip install --no-deps --no-build-isolation -e . # the project itself",
+    "pip install --require-hashes -rrequirements-ci.lock",                   # attached -rFILE form
+    "pip install --require-hashes --requirement=requirements-ci.lock",
+    "pip install --require-hashes --no-cache-dir -q -r requirements.lock",
+    "pip install --require-hashes -r requirements.lock -r requirements-ci.lock",
+])
+def test_hash_locked_pip_commands_are_allowed(cmd):
+    assert _pip(cmd) == []
+
+
+@pytest.mark.parametrize("cmd", [
+    "pip install -r requirements.txt",
+    "pip install pytest",
+    "pip install pytest==9.1.1",                                # pinned but not hash-verified
+    "pip install pytest pytest-cov ruff cryptography",
+    "python -m pip install pyinstaller",
+    "pip install -r requirements-ci.lock",                      # lock without --require-hashes
+    "pip install --require-hashes -r requirements.txt",         # hashes required but input is not a lock
+    "pip install --require-hashes -r requirements-ci.lock pyinstaller",   # extra unlocked package
+    "pip install --require-hashes requirements-ci.lock",        # forgot -r: installs a package of that name
+    "pip install -e .",                                         # would resolve dependencies unpinned
+    "pip install .",
+    "pip install --no-deps -e .",                               # build isolation downloads setuptools unhashed
+    "pip install --no-build-isolation -e .",                    # dependencies would resolve unpinned
+    "pip install --no-deps --no-build-isolation -e . -e ./other",
+    "pip install --no-deps git+https://example.invalid/x.git",
+    "pip install --no-deps ./vendored",
+    "pip install --require-hashes --no-deps -r requirements-ci.lock extra",
+    "pip install --index-url https://example.invalid/simple --require-hashes -r requirements-ci.lock",
+    "pip install --extra-index-url https://example.invalid/simple --require-hashes -r requirements-ci.lock",
+    "pip install --upgrade pip setuptools",                     # only pip itself may float
+    "pip install --require-hashes \\\n  -r requirements.txt",
+    "pip install pytest && echo done",
+    "python -m pip install pytest | tee log",
+    "pip install --require-hashes -rrequirements.txt",
+    "pip install --require-hashes --requirement=requirements.txt",
+    "pip install --require-hashes -r requirements-ci.lock -r requirements.txt",
+    "pip install --require-hashes -r requirements-ci.lock -e .",
+    "pip install --require-hashes --find-links ./wheels -r requirements-ci.lock",
+    "pip install --upgrade pip --index-url https://example.invalid/simple",
+    "pip install --upgrade -r requirements.txt",
+    "pip install pip",                                          # not the self-upgrade form
+    "pip install --upgrade pip==99.0",                          # only the bare name is allowed
+    "pip install --no-deps --no-build-isolation ./vendored",    # a local path other than the project
+    "pip install --no-deps --no-build-isolation -e ../other",
+    "pip install --no-deps --no-build-isolation . ./vendored",
+])
+def test_unlocked_pip_installs_are_errors(cmd):
+    out = _pip(cmd)
+    assert out, cmd
+    assert all("t.yml" in e for e in out)
+
+
+def test_pip_error_names_the_step_and_offers_the_fix():
+    out = _pip("pip install -r requirements.txt")
+    assert len(out) == 1
+    assert "t/" in out[0] and "--require-hashes" in out[0] and ".lock" in out[0], out
+
+
+def test_each_pip_command_on_a_line_is_judged_separately():
+    out = _pip("pip install --require-hashes -r requirements-ci.lock\npip install pytest")
+    assert len(out) == 1 and "pytest" in out[0], out
+
+
+SETUP_PY = (
+    "      - uses: actions/setup-python@{sha} # v5.6.0\n"
+    "        with:\n"
+    "          python-version: '3.12'\n"
+    "{extra}"
+    "      - run: echo hi\n"
+)
+
+
+def _setup(extra: str) -> list[str]:
+    body = SETUP_PY.format(sha=SHA2, extra=extra)
+    return [e for e in errs(GOOD.replace("      - run: echo hi\n", body)) if "cache" in e]
+
+
+def test_pip_cache_must_be_keyed_on_a_lock_file():
+    assert _setup("          cache: pip\n          cache-dependency-path: requirements-ci.lock\n") == []
+    assert _setup("") == []                                     # no cache at all is fine
+    assert _setup("          cache: pip\n          cache-dependency-path: requirements.txt\n")
+    assert _setup("          cache: pip\n")                    # default key globs requirements*.txt
+    assert _setup("          cache: pip\n          cache-dependency-path: |\n            requirements.lock\n            requirements.txt\n")
+
+
+def test_pip_cache_may_list_several_lock_files():
+    assert _setup("          cache: pip\n          cache-dependency-path: |\n"
+                  "            requirements.lock\n            requirements-ci.lock\n") == []
 
 
 # ---- repo-level consistency ---------------------------------------------------
@@ -321,6 +424,191 @@ def test_npm_lock_must_match_package_json(tmp_path):
     lock = {"lockfileVersion": 3, "packages": {"": {"devDependencies": {"electron": "^32.0.0"}}}}
     out = cw.check_release_consistency(_repo(tmp_path, lock=lock))
     assert any("package-lock.json" in e and "electron" in e for e in out), out
+
+
+# ---- Python lock files ---------------------------------------------------------------
+
+H1 = "sha256:" + "a" * 64
+H2 = "sha256:" + "b" * 64
+
+
+def _entry(name, version, *, marker="", hashes=(H1,), via="-r requirements.txt"):
+    head = f"{name}=={version}" + (f" ; {marker}" if marker else "")
+    lines = [head + " \\"]
+    for i, h in enumerate(hashes):
+        lines.append(f"    --hash={h}" + (" \\" if i < len(hashes) - 1 else ""))
+    lines.append(f"    # via {via}")
+    return "\n".join(lines) + "\n"
+
+
+RUNTIME_LOCK = (_entry("certifi", "2026.10.19") + _entry("pyyaml", "6.0.3")
+                + _entry("pycparser", "3.11", marker="python_full_version < '3.11'", hashes=(H1, H2))
+                + _entry("pycparser", "3.12", marker="python_full_version >= '3.11'"))
+CI_LOCK = RUNTIME_LOCK + _entry("pytest", "9.1.1") + _entry("cryptography", "50.0.2")
+
+CI_YML = f"""\
+name: C
+on: [push]
+permissions:
+  contents: read
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-python@{SHA2} # v5.6.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
+      - run: pip install --require-hashes -r requirements-ci.lock
+"""
+
+
+def _py_repo(tmp_path, **files):
+    root = _repo(tmp_path)
+    base = {
+        "requirements.txt": "PyYAML>=6.0\ncertifi\n# optional: x\n# cryptography>=42.0\n",
+        "requirements-ci.in": "-r requirements.txt\npytest\ncryptography\n",
+        "requirements.lock": RUNTIME_LOCK,
+        "requirements-ci.lock": CI_LOCK,
+    }
+    base.update(files)
+    for name, text in base.items():
+        if text is not None:
+            (root / name).write_text(text)
+    (root / ".github" / "workflows" / "ci.yml").write_text(CI_YML)
+    return root
+
+
+def test_consistent_python_locks_are_clean(tmp_path):
+    assert cw.check_python_locks(_py_repo(tmp_path)) == []
+
+
+def test_lock_entry_without_a_hash_is_flagged(tmp_path):
+    bad = RUNTIME_LOCK.replace(f"pyyaml==6.0.3 \\\n    --hash={H1}\n", "pyyaml==6.0.3\n")
+    assert bad != RUNTIME_LOCK
+    out = cw.check_python_locks(_py_repo(tmp_path, **{"requirements.lock": bad, "requirements-ci.lock": bad + CI_LOCK[len(RUNTIME_LOCK):]}))
+    assert any("pyyaml" in e and "hash" in e for e in out), out
+
+
+def test_malformed_hash_is_flagged(tmp_path):
+    bad = RUNTIME_LOCK.replace("a" * 64, "z" * 64, 1)
+    out = cw.check_python_locks(_py_repo(tmp_path, **{"requirements.lock": bad, "requirements-ci.lock": bad + CI_LOCK[len(RUNTIME_LOCK):]}))
+    assert any("hash" in e for e in out), out
+
+
+@pytest.mark.parametrize("line", ["-e .", "git+https://example.invalid/x.git#egg=x", "https://example.invalid/x.whl",
+                                  "pytest>=9", "pytest"])
+def test_lock_may_only_contain_pinned_hashed_requirements(tmp_path, line):
+    extra = "\n" + line + "\n"
+    out = cw.check_python_locks(_py_repo(tmp_path, **{"requirements-ci.lock": CI_LOCK + extra}))
+    assert any(line.split()[0] in e or "pinned" in e for e in out), (line, out)
+
+
+def test_package_missing_from_the_lock_is_flagged(tmp_path):
+    out = cw.check_python_locks(_py_repo(tmp_path, **{"requirements.txt": "PyYAML>=6.0\ncertifi\nrequests\n"}))
+    assert any("requests" in e and "requirements.lock" in e for e in out), out
+
+
+def test_name_matching_ignores_case_and_separators(tmp_path):
+    lock = _entry("curl-cffi", "0.16.3") + RUNTIME_LOCK
+    ci = lock + CI_LOCK[len(RUNTIME_LOCK):]
+    out = cw.check_python_locks(_py_repo(tmp_path, **{"requirements.txt": "curl_cffi>=0.5.10\nPyYAML>=6.0\ncertifi\n",
+                                                      "requirements.lock": lock, "requirements-ci.lock": ci}))
+    assert out == [], out
+
+
+def test_pinned_version_must_satisfy_the_minimum(tmp_path):
+    out = cw.check_python_locks(_py_repo(tmp_path, **{"requirements.txt": "PyYAML>=7.0\ncertifi\n"}))
+    assert any("pyyaml" in e.lower() and "7.0" in e and "6.0.3" in e for e in out), out
+
+
+def test_exact_and_upper_bound_specifiers_are_checked(tmp_path):
+    out = cw.check_python_locks(_py_repo(tmp_path, **{"requirements.txt": "PyYAML==6.0.2\ncertifi\n"}))
+    assert any("pyyaml" in e.lower() and "6.0.2" in e for e in out), out
+    out = cw.check_python_locks(_py_repo(tmp_path / "b", **{"requirements.txt": "PyYAML<6\ncertifi\n"}))
+    assert any("pyyaml" in e.lower() for e in out), out
+
+
+def test_ci_input_packages_must_be_in_the_ci_lock(tmp_path):
+    out = cw.check_python_locks(_py_repo(tmp_path, **{"requirements-ci.in": "-r requirements.txt\npytest\nruff\n"}))
+    assert any("ruff" in e and "requirements-ci.lock" in e for e in out), out
+
+
+def test_ci_lock_must_contain_every_runtime_pin_unchanged(tmp_path):
+    drift = CI_LOCK.replace("pyyaml==6.0.3", "pyyaml==6.0.2")
+    out = cw.check_python_locks(_py_repo(tmp_path, **{"requirements-ci.lock": drift}))
+    assert any("pyyaml" in e and "6.0.2" in e and "6.0.3" in e for e in out), out
+    missing = CI_LOCK.replace(_entry("certifi", "2026.10.19"), "")
+    out = cw.check_python_locks(_py_repo(tmp_path / "b", **{"requirements-ci.lock": missing}))
+    assert any("certifi" in e for e in out), out
+
+
+def test_marker_variants_of_one_package_are_kept_apart(tmp_path):
+    dropped = CI_LOCK.replace(_entry("pycparser", "3.12", marker="python_full_version >= '3.11'"), "")
+    out = cw.check_python_locks(_py_repo(tmp_path, **{"requirements-ci.lock": dropped}))
+    assert any("pycparser" in e and "3.12" in e for e in out), out
+
+
+@pytest.mark.parametrize("spec, ok", [
+    (">=6.0.3", True), (">6.0.3", False), (">=6.0.4", False), (">6.0.2", True),
+    ("<=6.0.3", True), ("<6.0.3", False), ("<6.0.4", True), ("<=6.0.2", False),
+    ("==6.0.3", True), ("==6.0.*", True), ("==6.1.*", False), ("!=6.0.3", False), ("!=6.0.2", True),
+    ("~=6.0", True), ("~=6.0.1", True), ("~=6.1", False), (">=6.0,<7", True), (">=6.0,<6.0.3", False),
+])
+def test_version_specifier_boundaries(tmp_path, spec, ok):
+    out = cw.check_python_locks(_py_repo(tmp_path, **{"requirements.txt": f"PyYAML{spec}\ncertifi\n"}))
+    assert (out == []) is ok, (spec, out)
+
+
+def test_ci_input_includes_are_followed_to_any_depth(tmp_path):
+    root = _py_repo(tmp_path, **{"requirements-ci.in": "-r requirements.txt\n-r extra.txt\n", "extra.txt": "-r more.txt\n",
+                                 "more.txt": "ruff\n"})
+    out = cw.check_python_locks(root)
+    assert any("more.txt" in e and "ruff" in e and "requirements-ci.lock" in e for e in out), out
+
+
+def test_missing_included_input_file_is_flagged(tmp_path):
+    root = _py_repo(tmp_path, **{"requirements-ci.in": "-r requirements.txt\n-r gone.txt\n"})
+    assert any("gone.txt" in e and "missing" in e for e in cw.check_python_locks(root))
+
+
+def test_dropping_the_first_marker_variant_is_flagged(tmp_path):
+    first = _entry("pycparser", "3.11", marker="python_full_version < '3.11'", hashes=(H1, H2))
+    assert first in CI_LOCK
+    out = cw.check_python_locks(_py_repo(tmp_path, **{"requirements-ci.lock": CI_LOCK.replace(first, "")}))
+    assert any("pycparser" in e and "3.11" in e for e in out), out
+
+
+def test_missing_lock_file_is_flagged(tmp_path):
+    out = cw.check_python_locks(_py_repo(tmp_path, **{"requirements-ci.lock": None}) if False else _py_repo(tmp_path))
+    assert out == []
+    root = _py_repo(tmp_path / "b")
+    (root / "requirements-ci.lock").unlink()
+    out = cw.check_python_locks(root)
+    assert any("requirements-ci.lock" in e and "missing" in e for e in out), out
+
+
+def test_workflow_must_reference_existing_lock_files(tmp_path):
+    root = _py_repo(tmp_path)
+    (root / ".github" / "workflows" / "ci.yml").write_text(CI_YML.replace("requirements-ci.lock", "requirements-gone.lock"))
+    out = cw.check_repo(root)
+    assert any("requirements-gone.lock" in e and "does not exist" in e for e in out), out
+
+
+def test_check_repo_includes_the_lock_checks(tmp_path):
+    root = _py_repo(tmp_path, **{"requirements.txt": "PyYAML>=6.0\ncertifi\nrequests\n"})
+    assert any("requests" in e for e in cw.check_repo(root))
+
+
+def test_repo_without_python_requirements_skips_lock_checks(tmp_path):
+    assert cw.check_python_locks(_repo(tmp_path)) == []
+
+
+def test_real_python_locks_are_consistent():
+    out = cw.check_python_locks(ROOT)
+    assert out == [], "\n".join(out)
 
 
 # ---- the real repository ----------------------------------------------------------

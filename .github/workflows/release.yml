@@ -37,7 +37,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: requirements-ci.lock
 
       - name: Check tag matches package version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -46,8 +46,7 @@ jobs:
       - name: Install build deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller pytest cryptography
+          pip install --require-hashes -r requirements-ci.lock
 
       - name: Run tests
         run: python -m pytest tests -q
@@ -146,7 +145,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: requirements-ci.lock
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -160,9 +159,12 @@ jobs:
       - name: Build the engine (PyInstaller, one-folder)
         run: |
           python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements-ci.lock
           # -e . makes `import xray_forge` work from any working directory
-          # (the electron-builder step reads the version from electron/)
-          pip install -e . -r requirements.txt cryptography pyinstaller
+          # (the electron-builder step reads the version from electron/).  Dependencies
+          # come from the lock above; --no-build-isolation uses the locked setuptools
+          # instead of downloading a build backend without hashes.
+          pip install --no-deps --no-build-isolation -e .
           pyinstaller --noconfirm --onedir --name xray-forge-engine \
             --exclude-module tkinter \
             --collect-submodules xray_forge \

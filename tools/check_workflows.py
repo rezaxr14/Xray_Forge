@@ -22,10 +22,17 @@ GitHub runner; it catches the mistakes that are cheap to catch offline:
   (``electron/package.json``), checksums and signatures, and the job only
   runs on tags after both builds; the tag check runs in both build jobs;
 * ``electron/package-lock.json`` is in sync with ``electron/package.json``
-  (``npm ci`` fails otherwise).
+  (``npm ci`` fails otherwise);
+* every ``pip install`` is hash-locked: ``pip install --require-hashes -r X.lock``
+  (the project itself only as ``pip install --no-deps -e .``, pip itself only as
+  ``pip install --upgrade pip``), and a ``cache: pip`` step is keyed on lock files;
+* the Python lock files are well formed (every pin has sha256 hashes), cover
+  everything ``requirements.txt`` / ``requirements-ci.in`` ask for at a version that
+  satisfies it, and ``requirements-ci.lock`` pins the runtime packages identically.
 
-Unpinned ``pip install`` arguments are reported as advisories until a Python
-lock file exists (see docs/packaging.md).
+Not checked: that the pins resolve for every Python/OS (that needs PyPI; see
+``tools/update_locks.sh`` and docs/local-agent-runbook.md) and that the locks are
+the freshest ones the inputs allow.
 """
 
 from __future__ import annotations
@@ -36,6 +43,7 @@ import pathlib
 import re
 import shlex
 import sys
+from collections import defaultdict
 
 try:
     import yaml
@@ -51,6 +59,20 @@ EXPR_RE = re.compile(r"\$\{\{\s*(.*?)\s*\}\}", re.S)
 SAFE_EXPR_ROOTS = {"matrix", "runner", "env", "strategy"}
 SHELLS_BANNED = {"pwsh", "powershell", "cmd"}
 RELEASE_ACTION = "softprops/action-gh-release"
+
+HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+LOCK_PIN_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==([A-Za-z0-9][A-Za-z0-9.!+_-]*)\s*(?:;\s*(.*\S))?\s*$")
+SPEC_RE = re.compile(r"^(~=|==|!=|<=|>=|<|>)\s*([A-Za-z0-9][A-Za-z0-9.*!+_-]*)$")
+REQ_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*([^;]*?)\s*(?:;.*)?$")
+RUNTIME_INPUT, CI_INPUT = "requirements.txt", "requirements-ci.in"
+RUNTIME_LOCK, CI_LOCK = "requirements.lock", "requirements-ci.lock"
+# pip options that take a separate value (so the value is not mistaken for a package)
+PIP_VALUE_FLAGS = {"-i", "--index-url", "--extra-index-url", "-f", "--find-links", "-c", "--constraint", "-t", "--target",
+                   "--prefix", "--root", "--python", "--platform", "--implementation", "--abi", "--python-version",
+                   "--trusted-host", "--proxy", "--cache-dir", "--log", "--report", "--progress-bar", "--root-user-action"}
+PIP_INDEX_FLAGS = {"-i", "--index-url", "--extra-index-url", "-f", "--find-links", "--trusted-host"}
+PIP_HINT = ("use 'pip install --require-hashes -r requirements-ci.lock' (the project itself: 'pip install --no-deps --no-build-isolation -e .'; "
+            "pip itself: 'pip install --upgrade pip')")
 
 # electron-builder target -> file extension of the artifact it writes
 TARGET_EXT = {
@@ -194,35 +216,119 @@ def check_workflow_text(text: str, name: str) -> list[str]:
             if not (exact and "--no-save" in flags):
                 errs.append(f"{name}: {label}: 'npm install{m.group(1).rstrip()}' floats versions; use 'npm ci' "
                             "(or '--no-save pkg@X.Y.Z' for a tool that is not a dependency)")
+
+    # -- pip: only hash-locked installs ---------------------------------------------------------
+    for label, args, ok, _files in _pip_installs(doc):
+        if not ok:
+            errs.append(f"{name}: {label}: 'pip install {' '.join(args)}' is not hash-locked; {PIP_HINT}")
+    errs += _pip_cache_errors(doc, name)
     return errs
 
 
-def advisories_text(text: str, name: str) -> list[str]:
-    """Things worth fixing that must not fail the build (unpinned pip installs)."""
-    try:
-        doc = _load_yaml(text)
-    except yaml.YAMLError:
-        return []
-    out: list[str] = []
-    for label, script in _run_texts(doc):
-        for m in re.finditer(r"\bpip\s+install\b([^\n&|;]*)", script):
+def _logical_lines(script: str) -> list[str]:
+    """Shell lines with backslash continuations joined."""
+    return re.sub(r"\\[ \t]*\r?\n", " ", script).splitlines()
+
+
+def _pip_commands(script: str) -> list[list[str]]:
+    """Argument lists of every ``pip install`` in a run script (up to the next shell operator).
+
+    A text scan, not a shell parser: ``echo pip install x`` is reported too, which is
+    the safe direction for a policy check.
+    """
+    found: list[list[str]] = []
+    for line in _logical_lines(script):
+        for m in re.finditer(r"(?<![\w./-])pip3?\s+install\b(.*)", line):
+            rest = m.group(1)
             try:
-                toks = shlex.split(m.group(1))
+                lex = shlex.shlex(rest, posix=True, punctuation_chars=True)
+                lex.whitespace_split = True
+                toks = list(lex)
             except ValueError:
-                toks = m.group(1).split()
-            skip = False
+                toks = rest.split()
+            args: list[str] = []
             for tok in toks:
-                if skip:
-                    skip = False
-                    continue
-                if tok in ("-r", "-c", "-e", "--requirement", "--constraint", "--editable"):
-                    skip = True
-                    continue
-                if tok.startswith("-") or tok in (".", "pip"):  # 'pip' = upgrading pip itself
-                    continue
-                if "==" not in tok:
-                    out.append(f"{name}: {label}: pip install {tok} is not pinned (needs the Python lock file)")
+                if tok and all(c in "();<>|&" for c in tok):
+                    break
+                args.append(tok)
+            found.append(args)
+    return found
+
+
+def _classify_pip(args: list[str]) -> tuple[bool, list[str]]:
+    """(ok, requirement files) for one ``pip install`` argument list."""
+    flags: set[str] = set()
+    reqfiles: list[str] = []
+    editable: list[str] = []
+    positional: list[str] = []
+    i = 0
+    while i < len(args):
+        tok = args[i]
+        nxt = args[i + 1] if i + 1 < len(args) else ""
+        if tok in ("-r", "--requirement"):
+            reqfiles.append(nxt)
+            i += 2
+            continue
+        if tok.startswith("--requirement="):
+            reqfiles.append(tok.split("=", 1)[1])
+        elif tok.startswith("-r") and not tok.startswith("--") and len(tok) > 2:
+            reqfiles.append(tok[2:])
+        elif tok in ("-e", "--editable"):
+            editable.append(nxt)
+            i += 2
+            continue
+        elif tok.startswith("--editable="):
+            editable.append(tok.split("=", 1)[1])
+        elif tok.startswith("-"):
+            flags.add(tok.split("=", 1)[0])
+            if tok in PIP_VALUE_FLAGS:
+                i += 2
+                continue
+        else:
+            positional.append(tok)
+        i += 1
+    if flags & PIP_INDEX_FLAGS:
+        return False, reqfiles
+    upgrade = bool(flags & {"--upgrade", "-U"})
+    if positional == ["pip"] and upgrade and not reqfiles and not editable:
+        return True, reqfiles
+    if reqfiles:
+        ok = ("--require-hashes" in flags and not positional and not editable
+              and all(f.endswith(".lock") for f in reqfiles))
+        return ok, reqfiles
+    local = positional + editable
+    # --no-build-isolation: isolation would download the build backend from PyPI without hashes;
+    # the locked setuptools (a PyInstaller dependency) is used instead.
+    if (local and set(local) == {"."} and {"--no-deps", "--no-build-isolation"} <= flags
+            and len(positional) + len(editable) == 1):
+        return True, reqfiles
+    return False, reqfiles
+
+
+def _pip_installs(doc) -> list[tuple[str, list[str], bool, list[str]]]:
+    """(label, args, ok, requirement files) for every ``pip install`` in a workflow."""
+    out = []
+    for label, script in _run_texts(doc):
+        for args in _pip_commands(script):
+            ok, files = _classify_pip(args)
+            out.append((label, args, ok, files))
     return out
+
+
+def _pip_cache_errors(doc, name: str) -> list[str]:
+    errs: list[str] = []
+    for jname, job in _jobs(doc).items():
+        for step in _steps(job):
+            if not str(step.get("uses", "")).startswith("actions/setup-python@"):
+                continue
+            with_ = step.get("with") or {}
+            if str(with_.get("cache", "")).strip() != "pip":
+                continue
+            paths = [ln.strip() for ln in str(with_.get("cache-dependency-path", "")).splitlines() if ln.strip()]
+            if not paths or not all(p.endswith(".lock") for p in paths):
+                errs.append(f"{name}: job '{jname}': setup-python 'cache: pip' must set cache-dependency-path to the "
+                            "Python lock file(s) (e.g. requirements-ci.lock), so the cache key changes with the pins")
+    return errs
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +440,157 @@ def check_release_consistency(root: pathlib.Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Python lock files
+# ---------------------------------------------------------------------------
+
+def _norm(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _ver(text: str) -> tuple[int, ...]:
+    """Release segment of a version as ints ('6.0.3rc1' -> (6, 0, 3)); pre/post tags are ignored."""
+    m = re.match(r"\d+(?:\.\d+)*", text)
+    return tuple(int(x) for x in m.group(0).split(".")) if m else ()
+
+
+def _cmp(a: tuple[int, ...], b: tuple[int, ...]) -> int:
+    n = max(len(a), len(b))
+    a, b = a + (0,) * (n - len(a)), b + (0,) * (n - len(b))
+    return (a > b) - (a < b)
+
+
+def _satisfies(version: str, op: str, wanted: str) -> bool:
+    v, w = _ver(version), _ver(wanted.rstrip(".*"))
+    if op == "==":
+        return v[:len(w)] == w if wanted.endswith("*") else _cmp(v, w) == 0
+    if op == "!=":
+        return not (v[:len(w)] == w if wanted.endswith("*") else _cmp(v, w) == 0)
+    if op == "~=":
+        return _cmp(v, w) >= 0 and v[:max(len(w) - 1, 1)] == w[:max(len(w) - 1, 1)]
+    c = _cmp(v, w)
+    return {">=": c >= 0, ">": c > 0, "<=": c <= 0, "<": c < 0}[op]
+
+
+def _parse_inputs(text: str) -> tuple[list[tuple[str, list[tuple[str, str]]]], list[str]]:
+    """((name, [(op, version)...]) per package, included files) of a requirements input file."""
+    pkgs: list[tuple[str, list[tuple[str, str]]]] = []
+    includes: list[str] = []
+    for raw in _logical_lines(text):
+        line = re.sub(r"(^|\s)#.*$", "", raw).strip()
+        if not line:
+            continue
+        if line.startswith(("-r ", "--requirement ")):
+            includes.append(line.split(None, 1)[1].strip())
+            continue
+        if line.startswith("-"):
+            continue
+        m = REQ_RE.match(line)
+        if not m:
+            continue
+        specs = []
+        for part in filter(None, (x.strip() for x in m.group(2).split(","))):
+            sm = SPEC_RE.match(part)
+            if sm:
+                specs.append((sm.group(1), sm.group(2)))
+        pkgs.append((_norm(m.group(1)), specs))
+    return pkgs, includes
+
+
+def _parse_lock(text: str, label: str) -> tuple[dict[str, set[str]], list[str]]:
+    """({name: {versions}}, errors) for a hash-pinned lock file."""
+    pins: dict[str, set[str]] = defaultdict(set)
+    errs: list[str] = []
+    for raw in _logical_lines(text):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        head, *hashes = re.split(r"\s+(?=--hash=)", line)
+        m = LOCK_PIN_RE.match(head)
+        if not m:
+            errs.append(f"{label}: {line!r} is not a pinned 'name==version' requirement; regenerate with tools/update_locks.sh")
+            continue
+        name, version = _norm(m.group(1)), m.group(2)
+        pins[name].add(version)
+        values = [h[len("--hash="):] for h in hashes if h.startswith("--hash=")]
+        if not values or len(values) != len(hashes):
+            errs.append(f"{label}: {name}=={version} has no --hash=sha256:... (pip --require-hashes would refuse the file)")
+        for h in values:
+            if not HASH_RE.match(h):
+                errs.append(f"{label}: {name}=={version} has a malformed hash {h!r}")
+    return dict(pins), errs
+
+
+def _check_inputs_against_lock(root: pathlib.Path, inputs: list[str], lock_name: str,
+                               pins: dict[str, set[str]]) -> list[str]:
+    errs: list[str] = []
+    seen: set[str] = set()
+    queue = list(inputs)
+    while queue:
+        fname = queue.pop(0)
+        if fname in seen:
+            continue
+        seen.add(fname)
+        path = root / fname
+        if not path.is_file():
+            errs.append(f"{fname} is missing (referenced by the Python requirements)")
+            continue
+        pkgs, includes = _parse_inputs(path.read_text(encoding="utf-8"))
+        queue += includes
+        for name, specs in pkgs:
+            versions = pins.get(name)
+            if not versions:
+                errs.append(f"{fname}: '{name}' is not in {lock_name}; run tools/update_locks.sh")
+                continue
+            if not any(all(_satisfies(v, op, w) for op, w in specs) for v in versions):
+                need = ",".join(f"{op}{w}" for op, w in specs)
+                have = ", ".join(sorted(versions))
+                errs.append(f"{lock_name} pins {name}=={have}, which does not satisfy '{name}{need}' from {fname}; "
+                            "run tools/update_locks.sh")
+    return errs
+
+
+def check_python_locks(root: pathlib.Path) -> list[str]:
+    root = pathlib.Path(root)
+    if not (root / RUNTIME_INPUT).is_file():
+        return []
+    errs: list[str] = []
+    locks: dict[str, dict[str, set[str]]] = {}
+    for lock_name, source in ((RUNTIME_LOCK, RUNTIME_INPUT), (CI_LOCK, CI_INPUT)):
+        if lock_name == CI_LOCK and not (root / CI_INPUT).is_file():
+            continue
+        path = root / lock_name
+        if not path.is_file():
+            errs.append(f"{lock_name} is missing (generate it with tools/update_locks.sh); workflows install from it")
+            continue
+        pins, e = _parse_lock(path.read_text(encoding="utf-8"), lock_name)
+        errs += e
+        locks[lock_name] = pins
+        errs += _check_inputs_against_lock(root, [source], lock_name, pins)
+    runtime, ci = locks.get(RUNTIME_LOCK), locks.get(CI_LOCK)
+    if runtime is not None and ci is not None:
+        for name, versions in sorted(runtime.items()):
+            for v in sorted(versions - ci.get(name, set())):
+                have = ", ".join(sorted(ci[name])) if name in ci else "nothing"
+                errs.append(f"{RUNTIME_LOCK} pins {name}=={v} but {CI_LOCK} pins {have}; "
+                            f"the two locks must agree (regenerate both with tools/update_locks.sh)")
+    return errs
+
+
+def _check_workflow_lock_refs(root: pathlib.Path) -> list[str]:
+    errs: list[str] = []
+    for path in _workflow_files(root):
+        try:
+            doc = _load_yaml(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError:
+            continue
+        for label, _args, _ok, files in _pip_installs(doc):
+            for f in files:
+                if f and not (pathlib.Path(root) / f).is_file():
+                    errs.append(f"{path.name}: {label}: {f} does not exist")
+    return errs
+
+
+# ---------------------------------------------------------------------------
 # whole repository
 # ---------------------------------------------------------------------------
 
@@ -346,14 +603,7 @@ def check_repo(root: pathlib.Path = ROOT) -> list[str]:
     errs: list[str] = []
     for path in _workflow_files(root):
         errs += check_workflow_text(path.read_text(encoding="utf-8"), path.name)
-    return errs + check_release_consistency(root)
-
-
-def advisories(root: pathlib.Path = ROOT) -> list[str]:
-    out: list[str] = []
-    for path in _workflow_files(root):
-        out += advisories_text(path.read_text(encoding="utf-8"), path.name)
-    return out
+    return errs + check_release_consistency(root) + _check_workflow_lock_refs(root) + check_python_locks(root)
 
 
 def main(argv: list[str]) -> int:
@@ -369,8 +619,6 @@ def main(argv: list[str]) -> int:
     errs = check_repo(root)
     for e in errs:
         print(f"::error::{e}")
-    for a in advisories(root):
-        print(f"::warning::{a}")
     if not errs:
         print("workflow policy ok")
     return 1 if errs else 0

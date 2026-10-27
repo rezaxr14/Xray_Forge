@@ -37,8 +37,29 @@ Needs network and [uv](https://docs.astral.sh/uv/).
     git diff --stat
 
 Report: the new `requirements.lock` and `requirements-ci.lock` (attach the files, they contain only
-public package names and hashes). Do not edit the workflows; the maintainer switches them to
-`pip install --require-hashes -r requirements-ci.lock` afterwards.
+public package names and hashes). Do not edit the workflows (they already install from the locks;
+Job 1b checks that). Run this job only when the maintainer asks for new locks.
+
+## Job 1b: install from the lock files (what CI now does)
+
+CI and the release build now install only from the hash-pinned locks. This job proves those exact
+commands work on a real machine, before a runner is asked to. Use a **new, empty virtual environment
+for each Python you have** (3.10, 3.12 and 3.13 are the CI matrix; any subset is useful):
+
+    python -m venv .venv-lock && .venv-lock/Scripts/activate      # Linux/macOS: source .venv-lock/bin/activate
+    python -m pip install --upgrade pip
+    pip install --require-hashes -r requirements-ci.lock
+    pip install --no-deps --no-build-isolation -e .
+    pip check
+    python -m xray_forge --help
+    python -m pytest -q
+    ruff check --select E9,F63,F7,F82 .
+    python tools/check_workflows.py
+
+Report per Python version: OS, `python --version`, and for each command pass/fail. For a failure paste
+the **exact** output (a hash mismatch, "no matching distribution", or a build error is the finding: do
+not retry with other flags, do not remove `--require-hashes`, do not regenerate the locks). Also report
+`pip list --format=freeze` for the first venv (package names and versions only).
 
 ## Job 2: live checks
 

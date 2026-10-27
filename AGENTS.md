@@ -32,8 +32,11 @@ python -m xray_forge --help
 python -m xray_forge convert in.txt out.txt
 python -m xray_forge export in.txt out.yaml --format clash
 
-# workflow policy (pinned actions, permissions, release consistency)
+# workflow policy (pinned actions, permissions, release consistency, hash-locked pip)
 python tools/check_workflows.py
+
+# Python deps: edit requirements.txt / requirements-ci.in, then regenerate both locks
+tools/update_locks.sh        # needs uv + network; workflows install with --require-hashes
 
 # desktop app tests (Node 22+; Playwright for the end-to-end tests)
 cd electron && npm test

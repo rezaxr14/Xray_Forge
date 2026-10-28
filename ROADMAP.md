@@ -174,14 +174,17 @@ See `docs/engine-api.md`.
   - ✅ MASQUE/Psiphon/any SOCKS-probe cancel now also works while the page fetch is in flight
     (it used to wait out the timeout once the port was open); tested with a fake core that
     accepts and never answers. Not re-checked on a real tunnel.
-  - 🟡 4.5 Release builds: runner images pinned (`ubuntu-24.04`, `windows-2022`; enforced by
+  - ✅ 4.5 Release builds: runner images pinned (`ubuntu-24.04`, `windows-2022`; enforced by
     `check_workflows.py`), and a new `tools/check_artifacts.py --smoke` step checks electron-builder's
     unpacked app (engine + app code present, Linux engine executable, GPL `LICENSE`/`NOTICE` shipped,
     packaged engine starts). Tested on fake trees and through the workflow's real shell step
-    (`tests/test_check_artifacts.py`, `test_release_dryrun.py`). **Not run on a runner since these
-    changes** (the last real run, 39136895263, predates them): runbook Job 7 (`-rc` tag rehearsal) first.
-    Known, unchecked risks: unsigned Windows installer (SmartScreen), AppImage FUSE and Ubuntu 24.04+
-    AppArmor sandbox (`docs/packaging.md`).
+    (`tests/test_check_artifacts.py`, `test_release_dryrun.py`). **Run for real** (maintainer's agent, Job 7,
+    tag `v2.1.0-rc1`, run 40667308665): all 5 jobs green, both unpacked apps passed the check with the engine
+    started, checksums verified, the Windows installer installed/launched/uninstalled silently and the AppImage
+    ran under WSL2 (FUSE present, no sandbox error, no `--no-sandbox`); the About tab showed v2.1.0, GPL-3.0 and
+    3 cores on both, and both links opened in the system browser. Still unchecked: the SmartScreen prompt (the
+    file had no download mark), Ubuntu 24.04+ on bare metal (AppArmor), a signed build. Minor: uninstall leaves an
+    empty install folder. CI on the pushed head: 9/9 green incl. the e2e job on `ubuntu-24.04`.
   - ✅ `.gitattributes` pins `*.sh` to LF (a CRLF checkout broke `tools/update_locks.sh`
     under WSL).
 - ✅ About tab: version and engine protocol (from `engine.info`), license (GPL-3.0), project and

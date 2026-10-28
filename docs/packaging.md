@@ -79,9 +79,12 @@ package version): the tag runs the workflow file at that commit and creates a *p
 
 ## Status
 
-**Re-verification needed.** The run below predates Python 3.15 / Node 24 builds, the pinned runner
-images, the hash-locked installs, the GPL relicense (new `LICENSE`/`NOTICE` in the installers) and the
-`check_artifacts` step. Rehearse with an `-rc` tag (see above) and runbook Job 7.
+**Re-verified 2026-10-28** with the pre-release tag `v2.1.0-rc1` (run 40667308665, Python 3.15, Node 24,
+pinned runners, hash-locked installs, GPL-3.0 files, `check_artifacts`): all jobs green; artifacts were a
+94 MB Windows installer and a 141 MB Linux AppImage (plus the two CLI zips), checksums verified. The Windows
+installer installed, launched and uninstalled (it leaves an empty folder); the AppImage ran under WSL2 with no
+sandbox error. Not checked: the SmartScreen prompt, a bare-metal Ubuntu 24.04+ (AppArmor), signing.
+Earlier run for reference:
 
 Verified on real runners (run 39136895263, head 8efd63e): CLI build and
 desktop build on Windows and Linux are green; artifacts were a 88 MB Windows

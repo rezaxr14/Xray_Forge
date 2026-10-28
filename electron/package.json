@@ -11,8 +11,8 @@
     "dist": "electron-builder --publish never"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.8"
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0"
   },
   "author": "Reza Nadimi <rezaxr14@gmail.com>",
   "build": {

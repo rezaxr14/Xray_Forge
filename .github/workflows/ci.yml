@@ -2,10 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, "feat/**" ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+
+# Read-only token: CI only checks code out and uploads artifacts.
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -20,7 +24,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.10", "3.12", "3.13"]
+        python-version: ["3.10", "3.12", "3.13", "3.15"]
     # One shell everywhere: PowerShell does not expand globs or support heredocs,
     # which is what broke the old Windows-only job.
     defaults:
@@ -28,26 +32,20 @@ jobs:
         shell: bash
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-          cache-dependency-path: requirements.txt
-
-      - name: Install Tk and Xvfb (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends python3-tk xvfb
+          cache-dependency-path: requirements-ci.lock
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest ruff
+          # every package, with sha256 hashes, from the committed lock (tools/update_locks.sh)
+          pip install --require-hashes -r requirements-ci.lock
 
       - name: Compile check
         run: python -m compileall -q xray_forge Xray_Forge.py
@@ -55,8 +53,17 @@ jobs:
       - name: Lint (syntax errors and undefined names only)
         run: ruff check --select E9,F63,F7,F82 .
 
-      - name: Unit tests
-        run: python -m pytest tests -v
+      - name: Unit tests (with coverage)
+        run: |
+          python -m pytest tests -v \
+            --cov=xray_forge --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage report
+        if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-ubuntu-py312
+          path: coverage.xml
 
       - name: CLI smoke test
         run: |
@@ -69,17 +76,49 @@ jobs:
           python -m xray_forge export "$RUNNER_TEMP/out.txt" "$RUNNER_TEMP/sb.json" --format singbox
           test -s "$RUNNER_TEMP/clash.yaml" && test -s "$RUNNER_TEMP/sb.json"
 
-      - name: GUI smoke test (launch and destroy)
+  ui:
+    name: Electron UI (e2e)
+    # Pinned, not ubuntu-latest: Playwright's --with-deps needs a dependency map for the
+    # image, and 1.56.0 has none for Ubuntu 26.04 (what ubuntu-latest became on 2026-10-19).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.15"
+          cache: pip
+          cache-dependency-path: requirements-ci.lock
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+
+      - name: Install engine dependencies
         run: |
-          cat > "$RUNNER_TEMP/gui_smoke.py" <<'PY'
-          from xray_forge.app import App
-          app = App()
-          app.update()
-          app.destroy()
-          print("GUI smoke test passed")
-          PY
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            xvfb-run -a python "$RUNNER_TEMP/gui_smoke.py"
-          else
-            python "$RUNNER_TEMP/gui_smoke.py"
-          fi
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements-ci.lock
+
+      - name: Install UI dependencies and Playwright
+        working-directory: electron
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"   # the e2e tests use Chromium, not Electron
+        run: |
+          npm ci
+          npm install --no-save playwright@1.56.0
+          npx playwright install --with-deps chromium
+
+      - name: Syntax check
+        working-directory: electron
+        run: |
+          for f in main.js preload.js engine-client.js engine-path.js files.js renderer/app.js; do node --check "$f"; done
+
+      - name: End-to-end tests (renderer + real engine)
+        working-directory: electron
+        env:
+          XRAY_FORGE_PYTHON: python
+        run: npm test

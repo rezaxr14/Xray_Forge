@@ -10,6 +10,8 @@ Heavy-censorship evasion techniques (patterniha MMDF / gfw-knocker / Xray-core f
   - TCP Fast Open, User-Agent rotation
 """
 
+from __future__ import annotations
+
 import base64
 import importlib.util
 import json
@@ -24,7 +26,7 @@ import time
 import urllib.request
 import uuid as uuid_mod
 from typing import Any
-from urllib.parse import urlsplit, quote
+from urllib.parse import urlsplit, urljoin, quote
 
 from xray_forge.core.config import IPV4_RE, DOH_SERVERS, IRAN_UDP_RESOLVERS, DOH_ENDPOINTS, GEO_VIA_TUNNEL, FAKE_SNI_PRESETS
 
@@ -52,6 +54,9 @@ def _check(stop: threading.Event | None, deadline: float | None) -> None:
 
 def human_ssl_error(e: Exception) -> str:
     s = str(e)
+    if isinstance(e, ssl.SSLCertVerificationError):
+        why = (getattr(e, "verify_message", "") or "untrusted").strip()
+        return f"certificate rejected: {why}"[:60]
     if "WRONG_VERSION_NUMBER" in s:
         return "non-TLS answer (wrong port / DPI injection)"
     if "SSLV3_ALERT" in s:
@@ -172,12 +177,33 @@ def _mix_sni_case(sni: str) -> str:
 # TLS client with optional fake/record fragmentation
 # ---------------------------------------------------------------------------
 
+def _load_trust_store(ctx: ssl.SSLContext, cafile: str | None = None) -> None:
+    """Load CA roots for a verifying context (explicit file, else OS + certifi)."""
+    if cafile:
+        ctx.load_verify_locations(cafile=cafile)
+        return
+    try:
+        ctx.load_default_certs()
+    except Exception:
+        pass
+    try:  # curl_cffi depends on certifi, so it is normally present
+        import certifi
+        ctx.load_verify_locations(cafile=certifi.where())
+    except Exception:
+        pass
+
+
 class TLSClient:
     def __init__(self, send, recv, sni: str | None = None,
                  ciphers: str | None = None, frag: tuple | None = None,
                  stop: threading.Event | None = None, hs_timeout: float = 5.0,
                  fake_sni: str | None = None, record_frag: bool = False,
-                 pad_hello: bool = False):
+                 pad_hello: bool = False, verify: bool = False,
+                 verify_name: str | None = None, cafile: str | None = None):
+        """``verify=False`` (default) is for *probing* censored paths, where the
+        point is to see whether a handshake completes.  Anything that trusts
+        the response (DoH answers, subscriptions) must pass ``verify=True``:
+        the certificate chain and ``verify_name`` are then enforced."""
         self._send = send
         self._recv = recv
         self._stop = stop
@@ -187,8 +213,17 @@ class TLSClient:
         self._record_frag = record_frag
         self._pad_hello = pad_hello
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
+        if verify:
+            if not verify_name:
+                raise ProbeError("tls", "certificate verification needs a host name")
+            ctx.check_hostname = True
+            ctx.verify_mode = ssl.CERT_REQUIRED
+            _load_trust_store(ctx, cafile)
+            fake_sni = None          # the hello must carry the verified name
+            sni = verify_name
+        else:
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
         try:
             ctx.set_alpn_protocols(["http/1.1"])
         except Exception:
@@ -275,7 +310,9 @@ def tls_connect(host: str, port: str, sni: str | None = None,
                 fake_sni: str | None = None,
                 record_frag: bool = False,
                 pad_hello: bool = False,
-                tfo: bool = False):
+                tfo: bool = False,
+                verify: bool = False,
+                cafile: str | None = None):
     t0 = time.perf_counter()
     try:
         sock = socket.create_connection((host, int(port)), timeout=timeout)
@@ -296,7 +333,9 @@ def tls_connect(host: str, port: str, sni: str | None = None,
                        ciphers=ciphers, frag=frag, stop=stop,
                        hs_timeout=max(0.5, timeout),
                        fake_sni=fake_sni, record_frag=record_frag,
-                       pad_hello=pad_hello)
+                       pad_hello=pad_hello, verify=verify,
+                       verify_name=(sni or host) if verify else None,
+                       cafile=cafile)
         info: dict[str, Any] = {
             "tls_ms": (time.perf_counter() - t0) * 1000,
             "ver": tc.obj.version() or "tls",
@@ -327,6 +366,16 @@ def tcp_ping(host: str, port: str, timeout: float = 3.0, attempts: int = 2,
     return best
 
 
+def _xor_mask(payload: bytes, mask: bytes) -> bytes:
+    """RFC 6455 payload masking, without a per-byte Python loop."""
+    n = len(payload)
+    if n == 0:
+        return b""
+    key = (mask * (n // 4 + 1))[:n]
+    return (int.from_bytes(payload, "little")
+            ^ int.from_bytes(key, "little")).to_bytes(n, "little")
+
+
 def ws_frame(opcode: int, payload: bytes) -> bytes:
     mask = os.urandom(4)
     head = bytes([0x80 | opcode])
@@ -337,8 +386,7 @@ def ws_frame(opcode: int, payload: bytes) -> bytes:
         head += bytes([0x80 | 126]) + n.to_bytes(2, "big")
     else:
         head += bytes([0x80 | 127]) + n.to_bytes(8, "big")
-    masked = bytes(b ^ mask[i & 3] for i, b in enumerate(payload))
-    return head + mask + masked
+    return head + mask + _xor_mask(payload, mask)
 
 
 def ws_send(stream: TLSClient, payload: bytes, opcode: int = 0x2) -> None:
@@ -469,7 +517,14 @@ def _dechunk(body: bytes, recv, deadline: float | None,
         body = body[size + 2:]
 
 
-def _read_http(recv, deadline: float | None, stop: threading.Event | None):
+def _read_http(recv, deadline: float | None, stop: threading.Event | None,
+               read_to_eof: bool = False, max_body: int | None = None):
+    """Read one HTTP/1.x response.  Returns {status, body, headers}.
+
+    ``read_to_eof`` also reads close-delimited bodies (no Content-Length, not
+    chunked) until the peer closes; ``max_body`` raises ProbeError("size")
+    instead of buffering an unbounded response.
+    """
     buf = b""
     while b"\r\n\r\n" not in buf:
         _check(stop, deadline)
@@ -491,6 +546,8 @@ def _read_http(recv, deadline: float | None, stop: threading.Event | None):
     cl = hdrs.get("content-length")
     if cl and cl.isdigit():
         need = int(cl)
+        if max_body is not None and need > max_body:
+            raise ProbeError("size", f"response too large ({need} bytes)")
         while len(body) < need:
             _check(stop, deadline)
             d = recv(deadline)
@@ -500,7 +557,23 @@ def _read_http(recv, deadline: float | None, stop: threading.Event | None):
         body = body[:need]
     elif "chunked" in hdrs.get("transfer-encoding", "").lower():
         body = _dechunk(body, recv, deadline, stop)
-    return {"status": status, "body": body}
+    elif read_to_eof:
+        while True:
+            _check(stop, deadline)
+            try:
+                d = recv(deadline)
+            except ProbeError as pe:
+                if pe.stage == "io" and "closed" in pe.detail:
+                    break              # peer closed: end of body
+                raise
+            if not d:
+                break
+            body += d
+            if max_body is not None and len(body) > max_body:
+                raise ProbeError("size", f"response larger than {max_body} bytes")
+    if max_body is not None and len(body) > max_body:
+        raise ProbeError("size", f"response larger than {max_body} bytes")
+    return {"status": status, "body": body, "headers": hdrs}
 
 
 def tunnel_http_get(tun: "VlessTunnel", host: str, path: str,
@@ -513,6 +586,37 @@ def tunnel_http_get(tun: "VlessTunnel", host: str, path: str,
            f"Connection: close\r\n\r\n").encode()
     t0 = time.perf_counter()
     tun.send(req)
+    raw = _read_http(tun.recv, deadline, stop)
+    ms = (time.perf_counter() - t0) * 1000
+    return ms, raw["status"], raw["body"]
+
+
+UPLOAD_CHUNK = 16384
+
+
+def tunnel_http_post(tun: "VlessTunnel", host: str, path: str, nbytes: int,
+                     timeout: float, stop: threading.Event | None):
+    """POST ``nbytes`` through ``tun`` and wait for the server's response.
+
+    Returns (ms, status_line, body).  The clock covers the whole exchange
+    (first byte sent -> response read), so a link that throttles or drops
+    uploads shows up as a slow or failed stage instead of "bytes handed to
+    the local socket buffer".
+    """
+    deadline = time.perf_counter() + timeout
+    head = (f"POST {path} HTTP/1.1\r\nHost: {host}\r\n"
+            f"User-Agent: {_random_ua()}\r\n"
+            f"Content-Type: application/octet-stream\r\n"
+            f"Content-Length: {nbytes}\r\nConnection: close\r\n\r\n").encode()
+    chunk = b"x" * UPLOAD_CHUNK
+    t0 = time.perf_counter()
+    tun.send(head)
+    sent = 0
+    while sent < nbytes:
+        _check(stop, deadline)
+        n = min(UPLOAD_CHUNK, nbytes - sent)
+        tun.send(chunk[:n])
+        sent += n
     raw = _read_http(tun.recv, deadline, stop)
     ms = (time.perf_counter() - t0) * 1000
     return ms, raw["status"], raw["body"]
@@ -630,9 +734,11 @@ def rotated_geo(start: int):
 def doh_resolve(host: str, timeout: float = 4.0) -> list[str]:
     for srv, path0 in DOH_SERVERS:
         try:
+            # verify=True: the resolvers' certificates carry IP SANs, so a
+            # forged answer from an on-path box fails the handshake instead.
             tc, sock, _ = tls_connect(srv, "443", sni=None,
                                       frag=parse_frag("rand:1-16@1"),
-                                      timeout=timeout)
+                                      timeout=timeout, verify=True)
             try:
                 req = (f"GET {path0}?name={quote(host)}&type=A HTTP/1.1\r\n"
                        f"Host: {srv}\r\naccept: application/dns-json\r\n"
@@ -654,45 +760,97 @@ def doh_resolve(host: str, timeout: float = 4.0) -> list[str]:
     return []
 
 
-def direct_get_json(url_str: str, timeout: float = 6.0):
-    p = urlsplit(url_str)
-    sch = p.scheme.lower()
-    host = p.hostname or ""
-    port = p.port or (443 if sch == "https" else 80)
-    path = (p.path or "/") + (("?" + p.query) if p.query else "")
-    ips = doh_resolve(host, timeout) or [host]
-    if not ips:
-        raise ProbeError("dns", f"cannot resolve {host}")
-    last = ""
-    for ip in ips[:2]:
+MAX_FETCH_BYTES = 4 * 1024 * 1024
+_REDIRECT_CODES = (301, 302, 303, 307, 308)
+
+
+def _status_code(status_line: str) -> int:
+    parts = (status_line or "").split(" ", 2)
+    return int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+
+
+def _http_get_once(sch: str, ip: str, port: int, host: str, path: str,
+                   timeout: float, max_bytes: int, verify: bool,
+                   cafile: str | None) -> dict:
+    """One GET to ``ip`` (Host/SNI = ``host``). Returns the _read_http dict."""
+    req = (f"GET {path} HTTP/1.1\r\nHost: {host}\r\n"
+           f"User-Agent: {_random_ua()}\r\nAccept: */*\r\n"
+           f"Accept-Encoding: identity\r\nConnection: close\r\n\r\n").encode()
+    deadline = time.perf_counter() + timeout
+    if sch == "https":
+        sni = None if (IPV4_RE.match(host) or not host) else host
+        tc, sock, _ = tls_connect(ip, str(port), sni=sni,
+                                  frag=parse_frag("rand:1-16@1"),
+                                  timeout=timeout, verify=verify,
+                                  cafile=cafile)
         try:
-            if sch == "https":
-                sni = None if (IPV4_RE.match(host) or not host) else host
-                tc, sock, _ = tls_connect(ip, str(port), sni=sni,
-                                          frag=parse_frag("rand:1-16@1"),
-                                          timeout=timeout)
-                try:
-                    raw = _read_http(lambda dl: tc.read(65536, deadline=dl),
-                                     time.perf_counter() + timeout, None)
-                finally:
-                    sock.close()
-            else:
-                s = socket.create_connection((ip, port), timeout=timeout)
-                try:
-                    s.sendall((f"GET {path} HTTP/1.1\r\nHost: {host}\r\n"
-                               f"User-Agent: {_random_ua()}\r\n"
-                               f"Connection: close\r\n\r\n").encode())
-                    raw = _read_http(sock_recv(s, None),
-                                     time.perf_counter() + timeout, None)
-                finally:
-                    s.close()
-            code = raw["status"].split(" ")[1] if " " in raw["status"] else ""
-            if code.startswith("2") or code in ("301", "302"):
-                return json.loads(raw["body"].decode("utf-8", "replace"))
-            last = raw["status"]
-        except Exception as e:
-            last = str(e)
-    raise ProbeError("geo", f"direct fetch failed: {last[:44]}")
+            tc.write(req)
+            return _read_http(lambda dl: tc.read(65536, deadline=dl),
+                              deadline, None, read_to_eof=True,
+                              max_body=max_bytes)
+        finally:
+            sock.close()
+    s = socket.create_connection((ip, port), timeout=timeout)
+    try:
+        s.sendall(req)
+        return _read_http(sock_recv(s, None), deadline, None,
+                          read_to_eof=True, max_body=max_bytes)
+    finally:
+        s.close()
+
+
+def direct_get_text(url_str: str, timeout: float = 6.0,
+                    max_bytes: int = MAX_FETCH_BYTES, max_redirects: int = 3,
+                    verify: bool = True, cafile: str | None = None) -> str:
+    """GET ``url_str`` over a DPI-resistant (fragmented) connection.
+
+    * http/https only -- anything else (file://, ftp://) is refused
+    * HTTPS certificates are verified by default (``verify=False`` is only
+      for probing, never for content you will trust)
+    * resolves through DoH, follows up to ``max_redirects`` redirects
+    * refuses responses larger than ``max_bytes``
+    """
+    hops = 0
+    while True:
+        p = urlsplit(url_str)
+        sch = p.scheme.lower()
+        host = p.hostname or ""
+        if sch not in ("http", "https") or not host:
+            raise ProbeError("url", "only http/https URLs are supported")
+        port = p.port or (443 if sch == "https" else 80)
+        path = (p.path or "/") + (("?" + p.query) if p.query else "")
+        ips = doh_resolve(host, timeout) or [host]
+        raw = None
+        last = ""
+        for ip in ips[:2]:
+            try:
+                raw = _http_get_once(sch, ip, port, host, path, timeout,
+                                     max_bytes, verify, cafile)
+                break
+            except ProbeError as e:
+                last = e.detail
+                if e.stage == "size":
+                    raise
+            except OSError as e:
+                last = oserr_text(e)
+        if raw is None:
+            raise ProbeError("fetch", f"direct fetch failed: {last[:44]}")
+        code = _status_code(raw["status"])
+        loc = raw.get("headers", {}).get("location", "")
+        if code in _REDIRECT_CODES and loc:
+            hops += 1
+            if hops > max_redirects:
+                raise ProbeError("fetch", "too many redirects")
+            url_str = urljoin(url_str, loc)
+            continue
+        if 200 <= code < 300:
+            return raw["body"].decode("utf-8", "replace")
+        raise ProbeError("fetch", f"HTTP {code or raw['status'][:30]}")
+
+
+def direct_get_json(url_str: str, timeout: float = 6.0):
+    """JSON variant of :func:`direct_get_text` (same safety rules)."""
+    return json.loads(direct_get_text(url_str, timeout=timeout))
 
 
 def fetch_json(url: str, timeout: float = 8.0):

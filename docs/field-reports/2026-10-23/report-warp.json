@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "env": {
+    "python": "3.12.3",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "xray_forge": "2.1.0",
+    "cores": [
+      {
+        "name": "xray",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      },
+      {
+        "name": "singbox",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      },
+      {
+        "name": "singbox_extended",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      },
+      {
+        "name": "psiphon",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      },
+      {
+        "name": "mihomo",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      }
+    ]
+  },
+  "checks": [
+    {
+      "name": "warp-scan",
+      "status": "ran",
+      "ok": true,
+      "detail": "40 responsive endpoint(s)",
+      "best_ms": 2002,
+      "seconds": 8.1
+    }
+  ]
+}

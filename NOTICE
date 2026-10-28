@@ -1,0 +1,25 @@
+Xray Forge
+Copyright 2026 Reza Nadimi
+
+This product includes software developed by Reza Nadimi and the Xray Forge
+contributors. It is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License, version 3, as published by
+the Free Software Foundation (see LICENSE).
+
+It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+Source code: https://github.com/rezaxr14/Xray_Forge
+The complete corresponding source of every release is the tagged commit in
+that repository.
+
+Xray Forge talks to, and can launch, third-party proxy cores (Xray-core,
+sing-box, mihomo, sing-box-extended, Psiphon's ConsoleClient). Those programs
+are not part of this work and keep their own licenses; they are neither bundled
+nor relicensed by it.
+
+Installers and executables also contain third-party libraries (Python and its
+standard library, curl_cffi, PyYAML, cryptography, PyInstaller's runtime,
+Electron and Chromium, and the npm packages listed in electron/package-lock.json).
+Each keeps its own license and notices.

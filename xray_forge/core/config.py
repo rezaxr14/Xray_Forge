@@ -2,6 +2,8 @@
 Core configuration and constants for Xray Forge.
 """
 
+from __future__ import annotations
+
 import json
 import re
 
@@ -21,7 +23,7 @@ FINGERPRINTS = [
     "sogou",
     "random",
     "randomized",
-    "unsafe",
+    "unsafe",  # PattN/PattNG: deliberately non-standard hello
 ]
 
 # --- MMDF / domain-fronting / fake-SNI presets (patterniha MMDF tricks) ---
@@ -70,7 +72,18 @@ DEFAULT_FM = {
 }
 
 DEFAULT_TEMPLATE = "{id:02d}_{sub}_{path}"
+# Keys a naming template may use (``parser.make_namer`` provides each of them).
+TEMPLATE_KEYS = ("id", "sub", "path", "ip", "port", "host", "net", "sni",
+                 "proto", "old")
 PROXY_SCHEMES = {"vless", "trojan", "vmess", "ss"}
+# Transports xray-core understands (converter + editor reference these).
+TRANSPORTS = ["ws", "grpc", "httpupgrade", "tcp", "xhttp", "http2"]
+# xtls flow presets (vision required for REALITY on xray)
+FLOWS = ["", "xtls-rprx-vision"]
+# Editor option lists (the Electron editor reads them from engine.info).
+SECURITIES = ["", "none", "tls", "reality"]
+XHTTP_MODES = ["", "auto", "packet-up", "stream-up", "stream-one"]
+
 IPV4_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 
 MODE_FULL = "⚡ Full fix   (fp→chrome + cs + fm)"
@@ -82,6 +95,13 @@ CF_RANGES = [
     "104.16.0.0/13", "104.24.0.0/14", "172.64.0.0/13", "162.158.0.0/15",
     "198.41.128.0/17", "141.101.64.0/18", "108.162.192.0/18",
     "190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22", "131.0.72.0/22",
+]
+
+FASTLY_RANGES = [
+    "23.235.32.0/20", "43.249.72.0/22", "103.244.50.0/24", "103.245.222.0/23",
+    "103.245.224.0/24", "104.156.80.0/20", "140.248.64.0/18", "146.75.0.0/16",
+    "151.101.0.0/16", "157.52.64.0/18", "167.82.0.0/17", "172.111.64.0/18",
+    "185.31.16.0/22", "199.27.72.0/21", "199.232.0.0/16",
 ]
 
 FRAG_PRESETS = ["5,94,1@2", "rand:8-32@3", "rand:1-16@2", "off"]
@@ -108,6 +128,28 @@ IRAN_UDP_RESOLVERS = [
     ("185.55.226.26", "begzar"),
     ("10.202.10.202", "403online")
 ]
+
+# --- WARP / WireGuard (see core/warp.py) ---
+WARP_API_BASE = "https://api.cloudflareclient.com/v0a2158/reg"
+WARP_CLIENT_VERSION = "a-6.30-3524"
+WARP_REFERRAL = ""
+WARP_DEFAULT_ENDPOINT = "engage.cloudflareclient.com:2408"
+WARP_RANGES = [
+    "162.159.192.0/24", "162.159.193.0/24",
+    "162.159.195.0/24", "188.114.96.0/23", "188.114.98.0/23",
+]
+WARP_PORTS = [500, 854, 8542, 1701, 4500, 2408, 894, 908, 4198, 4233]
+
+# --- MITM-DomainFronting (see core/domainfront.py) ---
+# Technique documented in XTLS/Xray-core#4348 ("Instant Certificate" / MITM
+# + TLS repack). Reimplemented here from public documentation.
+MITM_DF_XRAY_MIN_VERSION = "26.2.6"
+MITM_DEFAULT_CERT = "mycert.crt"
+MITM_DEFAULT_KEY = "mycert.key"
+MITM_SOCKS_PORT = 10808
+MITM_H11_PORT = 11666
+MITM_H2_PORT = 11777
+MITM_FAKE_DNS_SNI = "www.microsoft.com"
 
 
 def compact_json(obj) -> str:

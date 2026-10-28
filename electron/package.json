@@ -1,0 +1,64 @@
+{
+  "name": "xray-forge-ui",
+  "version": "2.1.0",
+  "private": true,
+  "description": "Electron front end for the Xray Forge Python engine",
+  "main": "main.js",
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "dist": "electron-builder --publish never"
+  },
+  "devDependencies": {
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0"
+  },
+  "author": "Reza Nadimi <rezaxr14@gmail.com>",
+  "build": {
+    "appId": "io.github.rezaxr14.xrayforge",
+    "productName": "Xray Forge",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "app-shell.js",
+      "preload.js",
+      "engine-client.js",
+      "engine-path.js",
+      "files.js",
+      "renderer/**/*",
+      "package.json",
+      "assets/icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "engine-dist",
+        "to": "engine"
+      },
+      {
+        "from": "legal",
+        "to": "legal"
+      }
+    ],
+    "artifactName": "XrayForge-${version}-${os}-${arch}.${ext}",
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Network"
+    }
+  }
+}

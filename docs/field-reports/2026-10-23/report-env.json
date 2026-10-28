@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "env": {
+    "python": "3.12.3",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "xray_forge": "2.1.0",
+    "cores": [
+      {
+        "name": "xray",
+        "found": true,
+        "source": "env",
+        "ok": true,
+        "version": "Xray 26.10.21 (Xray, Penetrates Everything.) 1b1647c (go1.27.3 windows/amd64)"
+      },
+      {
+        "name": "singbox",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      },
+      {
+        "name": "singbox_extended",
+        "found": true,
+        "source": "env",
+        "ok": true,
+        "version": "sing-box version 1.14.3-extended-2.7.3"
+      },
+      {
+        "name": "psiphon",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      },
+      {
+        "name": "mihomo",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      }
+    ]
+  },
+  "checks": []
+}

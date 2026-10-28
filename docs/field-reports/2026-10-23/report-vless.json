@@ -1,0 +1,83 @@
+{
+  "schema": 1,
+  "env": {
+    "python": "3.12.3",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "xray_forge": "2.1.0",
+    "cores": [
+      {
+        "name": "xray",
+        "found": true,
+        "source": "env",
+        "ok": true,
+        "version": "Xray 26.10.21 (Xray, Penetrates Everything.) 1b1647c (go1.27.3 windows/amd64)"
+      },
+      {
+        "name": "singbox",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      },
+      {
+        "name": "singbox_extended",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      },
+      {
+        "name": "psiphon",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      },
+      {
+        "name": "mihomo",
+        "found": false,
+        "source": "",
+        "ok": false,
+        "version": ""
+      }
+    ]
+  },
+  "checks": [
+    {
+      "name": "vless",
+      "status": "ran",
+      "ok": false,
+      "scheme": "vless",
+      "score": 10.0,
+      "techniques": [],
+      "stages": [
+        {
+          "name": "dns",
+          "ok": false,
+          "ms": 5053.703200013842,
+          "detail": "no answer (system fallback?)",
+          "numbers": {}
+        },
+        {
+          "name": "tcp",
+          "ok": true,
+          "ms": 1.2660999782383442,
+          "detail": "",
+          "numbers": {
+            "jitter": 13.9
+          }
+        },
+        {
+          "name": "tls",
+          "ok": false,
+          "ms": null,
+          "detail": "rand:1-16@2: closed during handshake (EOF)",
+          "numbers": {}
+        }
+      ],
+      "seconds": 15.0,
+      "detail": "a stage failed"
+    }
+  ]
+}

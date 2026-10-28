@@ -5,10 +5,15 @@ on:
     tags: [ "v*" ]
   workflow_dispatch:
 
+# Read-only by default; only the `release` job (which creates the GitHub
+# release) is granted contents: write.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  # Release builds run on pinned runner images, not "-latest": a Linux binary built on a newer
+  # glibc does not start on older distributions, and a runner migration must never change a
+  # release silently (tools/check_workflows.py enforces this).
   build:
     name: Build ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -17,10 +22,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - os: windows-2022
             artifact: XrayForge-windows-x64
             exe: XrayForge.exe
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             artifact: XrayForge-linux-x64
             exe: XrayForge
     defaults:
@@ -28,14 +33,14 @@ jobs:
         shell: bash
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.12"
+          python-version: "3.15"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: requirements-ci.lock
 
       - name: Check tag matches package version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -44,8 +49,7 @@ jobs:
       - name: Install build deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller pytest cryptography
+          pip install --require-hashes -r requirements-ci.lock
 
       - name: Run tests
         run: python -m pytest tests -q
@@ -63,7 +67,7 @@ jobs:
         run: |
           mkdir -p dist/pkg
           cp dist/XrayForge.exe dist/pkg/
-          cp README.md LICENSE dist/pkg/ 2>/dev/null || cp README.md dist/pkg/
+          cp README.md LICENSE NOTICE dist/pkg/
           # no `zip` binary on the Windows runners; archive with the stdlib
           python -c "import shutil; shutil.make_archive('dist/${{ matrix.artifact }}', 'zip', 'dist/pkg')"
 
@@ -73,7 +77,7 @@ jobs:
           mkdir -p dist/pkg
           cp dist/XrayForge dist/pkg/
           chmod +x dist/pkg/XrayForge
-          cp README.md LICENSE dist/pkg/ 2>/dev/null || cp README.md dist/pkg/
+          cp README.md LICENSE NOTICE dist/pkg/
           cd dist/pkg && zip -r ../${{ matrix.artifact }}.zip . && cd ..
 
       - name: Checksums
@@ -108,7 +112,7 @@ jobs:
           done
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.artifact }}
           path: |
@@ -124,11 +128,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - os: windows-2022
             artifact: XrayForge-desktop-windows-x64
             pattern: "*.exe"
             engine: xray-forge-engine.exe
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             artifact: XrayForge-desktop-linux-x64
             pattern: "*.AppImage"
             engine: xray-forge-engine
@@ -137,19 +141,19 @@ jobs:
         shell: bash
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.12"
+          python-version: "3.15"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: requirements-ci.lock
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "22"
+          node-version: "24"
 
       - name: Check tag matches package version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -158,9 +162,12 @@ jobs:
       - name: Build the engine (PyInstaller, one-folder)
         run: |
           python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements-ci.lock
           # -e . makes `import xray_forge` work from any working directory
-          # (the electron-builder step reads the version from electron/)
-          pip install -e . -r requirements.txt cryptography pyinstaller
+          # (the electron-builder step reads the version from electron/).  Dependencies
+          # come from the lock above; --no-build-isolation uses the locked setuptools
+          # instead of downloading a build backend without hashes.
+          pip install --no-deps --no-build-isolation -e .
           pyinstaller --noconfirm --onedir --name xray-forge-engine \
             --exclude-module tkinter \
             --collect-submodules xray_forge \
@@ -173,10 +180,15 @@ jobs:
           rm -rf electron/engine-dist
           cp -r dist/xray-forge-engine electron/engine-dist
 
+      - name: Stage license files for the installer
+        run: |
+          mkdir -p electron/legal
+          cp LICENSE NOTICE electron/legal/
+
       - name: Install UI dependencies and run unit tests
         working-directory: electron
         run: |
-          npm install
+          npm ci
           node --test test/engine-client.test.js
 
       - name: Build the installer
@@ -184,10 +196,21 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"   # unsigned unless you add signing
         run: |
-          # the tag check above guarantees tag == package version on releases
-          version="$(python -c 'import xray_forge; print(xray_forge.__version__)')"
+          # read from files, independent of the working directory; on a tag the
+          # check above guarantees its X.Y.Z core equals the package version
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(python ../tools/check_version.py --package)"
+          fi
+          echo "installer version: $version"
           npx electron-builder --publish never -c.extraMetadata.version="$version"
           ls -la release
+
+      # electron-builder's *-unpacked folder is exactly what the installer / AppImage is made
+      # from: check the engine, the license files and that the packaged engine starts.
+      - name: Check the unpacked app (layout, license files, engine starts)
+        run: python tools/check_artifacts.py --smoke electron/release/*-unpacked
 
       - name: Checksums
         working-directory: electron/release
@@ -220,7 +243,7 @@ jobs:
           done
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.artifact }}
           path: out/*
@@ -229,18 +252,23 @@ jobs:
     name: Attach binaries to GitHub Release
     needs: [build, desktop]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           merge-multiple: true
           path: dist
 
       - name: Create release and upload
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           generate_release_notes: true
+          # v2.1.0-rc1 style tags are published as pre-releases
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             dist/*.zip
             dist/*.exe

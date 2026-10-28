@@ -1,0 +1,8 @@
+# Tools CI and the release build install on top of requirements.txt.
+# Compiled into requirements-ci.lock by tools/update_locks.sh.
+-r requirements.txt
+pytest
+pytest-cov
+ruff
+cryptography
+pyinstaller

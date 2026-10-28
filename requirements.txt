@@ -1,1 +1,4 @@
 curl_cffi>=0.5.10
+PyYAML>=6.0
+# optional: MITM-DomainFronting certificate generation
+# cryptography>=42.0

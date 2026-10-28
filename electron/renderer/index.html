@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Xray Forge</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Xray Forge</h1>
+    <nav role="tablist">
+      <button role="tab" data-tab="configs" aria-selected="true">Configs</button>
+      <button role="tab" data-tab="convert" aria-selected="false">Convert</button>
+      <button role="tab" data-tab="health" aria-selected="false">Health check</button>
+      <button role="tab" data-tab="subs" aria-selected="false">Subscriptions</button>
+      <button role="tab" data-tab="scan" aria-selected="false">IP scanner</button>
+      <button role="tab" data-tab="sni" aria-selected="false">SNI search</button>
+      <button role="tab" data-tab="warp" aria-selected="false">WARP</button>
+      <button role="tab" data-tab="bridges" aria-selected="false">MASQUE / Psiphon</button>
+      <button role="tab" data-tab="mitm" aria-selected="false">MITM fronting</button>
+      <button role="tab" data-tab="cores" aria-selected="false">Cores</button>
+      <button role="tab" data-tab="about" aria-selected="false">About</button>
+    </nav>
+    <span id="settings-msg" class="bad-text small" role="status"></span>
+    <span id="engine-status" class="muted" aria-live="polite">engine: connecting…</span>
+  </header>
+
+  <datalist id="frag-presets"></datalist>
+
+  <main>
+    <!-- Configs -->
+    <section id="tab-configs" class="tab" role="tabpanel">
+      <div class="row">
+        <textarea id="cfg-input" rows="6" spellcheck="false"
+          placeholder="Paste share links (vless:// vmess:// trojan:// ss:// hy2:// tuic:// wireguard://), one per line"></textarea>
+        <div class="col">
+          <button id="cfg-parse" class="primary">Parse</button>
+          <button id="cfg-dedup">Remove duplicates</button>
+          <button id="cfg-open">Open file…</button>
+          <button id="cfg-clear">Clear</button>
+          <span id="cfg-count" class="muted">0 configs</span>
+        </div>
+      </div>
+      <div class="split">
+        <div class="table-wrap">
+          <table id="cfg-table">
+            <thead><tr><th>#</th><th>Name</th><th>Scheme</th><th>Endpoint</th><th>Transport</th><th>Security</th><th>Cores</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <aside id="editor" hidden>
+          <h2>Edit config</h2>
+          <form id="ed-form" autocomplete="off"></form>
+          <p class="muted small">Link parameters with no field here (ech, pcs, xhttp extra, …) are kept as they are; edit them under <code>extra_params</code> in the raw JSON.</p>
+          <div class="row">
+            <button id="ed-apply" class="primary" type="button">Apply</button>
+            <button id="ed-copy" type="button">Copy link</button>
+            <span id="ed-msg" class="muted" role="status"></span>
+          </div>
+          <label>Share link <textarea id="ed-uri" rows="4" readonly spellcheck="false"></textarea></label>
+          <details id="ed-raw">
+            <summary>Raw JSON</summary>
+            <div class="row">
+              <button id="ed-to-json" type="button">Form → JSON</button>
+              <button id="ed-from-json" type="button">JSON → form</button>
+            </div>
+            <textarea id="ed-json" rows="14" spellcheck="false" aria-label="Outbound JSON"></textarea>
+          </details>
+        </aside>
+      </div>
+      <div class="row">
+        <label>Export
+          <select id="export-format">
+            <option value="clash">Clash / Mihomo</option>
+            <option value="singbox">sing-box</option>
+            <option value="sub">Subscription (base64)</option>
+          </select>
+        </label>
+        <button id="export-run">Export</button>
+        <button id="export-save">Save…</button>
+        <span id="export-msg" class="muted" role="status"></span>
+      </div>
+      <textarea id="export-out" rows="6" readonly spellcheck="false" placeholder="Export output appears here"></textarea>
+    </section>
+
+    <!-- Convert -->
+    <section id="tab-convert" class="tab" role="tabpanel" hidden>
+      <div class="row"><button id="cv-open">Open file…</button></div>
+      <textarea id="cv-input" rows="8" spellcheck="false" placeholder="Paste links to fix (fingerprint, fragment, naming)"></textarea>
+
+      <fieldset class="rules" id="cv-rules">
+        <legend>1 · Transformation rules</legend>
+        <div class="row">
+          <label>Mode
+            <select id="cv-mode">
+              <option value="full">Full fix (fp + cs + fm)</option>
+              <option value="iponly">IP only (inject nothing)</option>
+              <option value="custom">Custom (use the switches)</option>
+            </select>
+          </label>
+          <label><input id="cv-want-fp" type="checkbox" checked> fp</label>
+          <label><input id="cv-want-cs" type="checkbox" checked> cs</label>
+          <label><input id="cv-want-fm" type="checkbox" checked> fm</label>
+          <label><input id="cv-tls-only" type="checkbox" checked> Only TLS links when injecting</label>
+          <label><input id="cv-rename" type="checkbox" checked> Rename</label>
+          <label><input id="cv-dedup" type="checkbox" checked> Remove duplicates</label>
+        </div>
+        <div class="row">
+          <label>fp (fingerprint) <input id="cv-fp" type="text" size="14"></label>
+          <label class="grow">cs (cipher suites) <input id="cv-cs" type="text"></label>
+        </div>
+        <div class="row">
+          <label class="grow">fm (fragment mask JSON) <input id="cv-fm" type="text"></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="rules" id="cv-naming">
+        <legend>2 · Naming</legend>
+        <div class="row">
+          <label class="grow">Name template <input id="cv-template" type="text"></label>
+          <label>Start # <input id="cv-start" type="number" min="0" max="99999" value="1"></label>
+          <span id="cv-keys" class="muted" title="Keys usable in the name template"></span>
+        </div>
+      </fieldset>
+
+      <fieldset class="rules" id="cv-override">
+        <legend>3 · Mass override: force one endpoint on every config</legend>
+        <div class="row">
+          <label><input id="cv-ip-on" type="checkbox"> Force IP</label>
+          <input id="cv-ip" type="text" size="24" placeholder="IPv4, IPv6 or domain" aria-label="Force IP">
+          <span id="cv-ip-badge" class="muted" role="status"></span>
+          <label><input id="cv-port-on" type="checkbox"> Force port</label>
+          <input id="cv-port" type="text" size="7" placeholder="1-65535" aria-label="Force port">
+          <span id="cv-port-badge" class="muted" role="status"></span>
+          <button id="cv-ov-clear" type="button">Clear override</button>
+          <span id="cv-ep" class="muted">endpoint: orig : orig</span>
+        </div>
+        <p class="muted small">Only the connect address changes; the ws host, SNI and path stay as they are.</p>
+      </fieldset>
+
+      <div class="row">
+        <button id="cv-run" class="primary">Convert</button>
+        <button id="cv-reset" type="button">Reset rules</button>
+        <span id="cv-msg" class="muted" role="status"></span>
+      </div>
+
+      <div class="split">
+        <div class="grow">
+          <textarea id="cv-output" rows="8" readonly spellcheck="false"></textarea>
+          <div class="row">
+            <button id="cv-copy">Copy output</button>
+            <button id="cv-save">Save output…</button>
+            <button id="cv-send">Send to Configs</button>
+          </div>
+        </div>
+        <aside id="cv-names-box" class="names">
+          <h2>Names</h2>
+          <div class="row">
+            <button id="cv-copy-names">Copy names</button>
+            <span class="muted small">click a name to copy that config</span>
+          </div>
+          <ul id="cv-names" class="name-list"></ul>
+        </aside>
+      </div>
+    </section>
+
+    <!-- Health -->
+    <section id="tab-health" class="tab" role="tabpanel" hidden>
+      <div class="row">
+        <label>Workers <input id="hc-workers" type="number" min="1" max="64" value="8"></label>
+        <label>Timeout (s) <input id="hc-timeout" type="number" min="1" max="60" value="6"></label>
+        <label>Core
+          <select id="hc-core"><option value="">native only</option><option value="auto">auto</option></select>
+        </label>
+        <label><input id="hc-throughput" type="checkbox" checked> Throughput</label>
+        <button id="hc-start" class="primary">Run on configs</button>
+        <button id="hc-cancel" disabled>Cancel</button>
+        <button id="hc-tag" disabled title="Append the exit country, e.g. name[DE], to results that reported one (needs a proxy core)">Tag names [CC]</button>
+        <button id="hc-retest" disabled title="Re-run the health check on the selected rows (click a row; Ctrl/Cmd-click for several)">Retest selected</button>
+        <button id="hc-copy" disabled>Copy link</button>
+        <button id="hc-keep" disabled>Keep passing → Configs</button>
+      </div>
+      <details class="adv" id="hc-adv">
+        <summary>Stage timeouts and anti-DPI options</summary>
+        <div class="row">
+          <label>Fragment variants <input id="hc-frag" type="text" size="30" list="frag-presets" placeholder="off 5,94,1@2 rand:1-16@2 (default)" aria-label="fragment variants, separated by spaces"></label>
+          <label>Fake SNI <input id="hc-fake" type="text" size="22" placeholder="e.g. www.microsoft.com"></label>
+          <label>Front Host header <input id="hc-front" type="text" size="22" placeholder="WebSocket Host (fronting)"></label>
+          <label><input id="hc-rec" type="checkbox"> TLS record fragmentation</label>
+          <label><input id="hc-pad" type="checkbox"> Pad ClientHello</label>
+        </div>
+        <p class="muted small">Used by the built-in TLS / WebSocket probes; checks run through a proxy core ignore them.</p>
+              <div class="row">
+          <label>DNS (s) <input id="hc-t-dns" type="number" min="0.5" max="120" step="0.5" placeholder="4"></label>
+          <label>TCP (s) <input id="hc-t-tcp" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+          <label>TLS (s) <input id="hc-t-tls" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+          <label>Request (s) <input id="hc-t-request" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+          <label>Transfer (s) <input id="hc-t-transfer" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+        </div>
+        <p class="muted small">Stage timeouts; blank = the Timeout above (DNS: 4 s). TLS applies to each fragment variant; Transfer covers download and upload.</p>
+      </details>
+      <div class="row">
+        <progress id="hc-progress" value="0" max="1"></progress>
+        <span id="hc-status" class="muted" role="status">idle</span>
+      </div>
+      <div class="table-wrap">
+        <table id="hc-table">
+          <thead><tr><th>Score</th><th>Name</th><th>Scheme</th><th>Stages</th><th>Techniques</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Subscriptions -->
+    <section id="tab-subs" class="tab" role="tabpanel" hidden>
+      <div class="row">
+        <input id="sub-url" type="url" size="52" placeholder="https://… subscription URL">
+        <input id="sub-name" type="text" size="16" placeholder="name (optional)">
+        <button id="sub-add" class="primary">Add</button>
+        <button id="sub-fetch">Fetch enabled</button>
+        <button id="sub-load">Load into Configs</button>
+        <span id="sub-msg" class="muted" role="status"></span>
+      </div>
+      <div id="sub-presets" class="row" aria-label="Free config sources"></div>
+      <div class="table-wrap">
+        <table id="sub-table">
+          <thead><tr><th>On</th><th>Name</th><th>URL</th><th>Configs</th><th>Status</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <fieldset class="rules" id="sk-box">
+        <legend>Check all sources</legend>
+        <div class="row">
+          <label>Workers <input id="sk-workers" type="number" min="1" max="64" value="8"></label>
+          <label>Timeout (s) <input id="sk-timeout" type="number" min="1" max="60" value="6"></label>
+          <label>Core
+            <select id="sk-core"><option value="">native only</option><option value="auto">auto</option></select>
+          </label>
+          <label><input id="sk-throughput" type="checkbox" checked> Throughput</label>
+          <button id="sk-start" class="primary" title="Health-check the cached configs of every enabled source (fetch first)">Check all sources</button>
+          <button id="sk-cancel" disabled>Cancel</button>
+        </div>
+      <details class="adv" id="sk-adv">
+        <summary>Stage timeouts and anti-DPI options</summary>
+        <div class="row">
+          <label>Fragment variants <input id="sk-frag" type="text" size="30" list="frag-presets" placeholder="off 5,94,1@2 rand:1-16@2 (default)" aria-label="fragment variants, separated by spaces"></label>
+          <label>Fake SNI <input id="sk-fake" type="text" size="22" placeholder="e.g. www.microsoft.com"></label>
+          <label>Front Host header <input id="sk-front" type="text" size="22" placeholder="WebSocket Host (fronting)"></label>
+          <label><input id="sk-rec" type="checkbox"> TLS record fragmentation</label>
+          <label><input id="sk-pad" type="checkbox"> Pad ClientHello</label>
+        </div>
+        <p class="muted small">Used by the built-in TLS / WebSocket probes; checks run through a proxy core ignore them.</p>
+              <div class="row">
+          <label>DNS (s) <input id="sk-t-dns" type="number" min="0.5" max="120" step="0.5" placeholder="4"></label>
+          <label>TCP (s) <input id="sk-t-tcp" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+          <label>TLS (s) <input id="sk-t-tls" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+          <label>Request (s) <input id="sk-t-request" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+          <label>Transfer (s) <input id="sk-t-transfer" type="number" min="0.5" max="120" step="0.5" placeholder="auto"></label>
+        </div>
+        <p class="muted small">Stage timeouts; blank = the Timeout above (DNS: 4 s). TLS applies to each fragment variant; Transfer covers download and upload.</p>
+      </details>
+        <div class="row">
+          <progress id="sk-progress" value="0" max="1"></progress>
+          <span id="sk-status" class="muted" role="status">idle</span>
+        </div>
+        <div class="row">
+          <label>Best N <input id="sk-n" type="number" min="1" max="1000" value="10"></label>
+          <button id="sk-export" disabled>Export best N (base64)</button>
+          <button id="sk-tagged" disabled>Show tagged lines</button>
+          <button id="sk-load" disabled>Best N → Configs</button>
+          <button id="sk-save">Save export…</button>
+          <button id="sk-copy" disabled title="Copy the selected row's link (click a row)">Copy link</button>
+        </div>
+        <div class="table-wrap short">
+          <table id="sk-table">
+            <thead><tr><th>Score</th><th>Name</th><th>Scheme</th><th>Stages</th><th>Techniques</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <textarea id="sk-out" rows="4" readonly aria-label="export output" placeholder="exported subscription / tagged lines appear here"></textarea>
+      </fieldset>
+    </section>
+
+    <!-- IP scanner -->
+    <section id="tab-scan" class="tab" role="tabpanel" hidden>
+      <fieldset class="rules" id="net-box">
+        <legend>Lookup</legend>
+        <div class="row">
+          <button id="net-myip">My IP</button>
+          <label>IP or domain <input id="net-geo-q" type="text" size="26" placeholder="empty = your own IP"></label>
+          <button id="net-geo">Geo lookup</button>
+          <label>Resolve host <input id="net-host" type="text" size="26" placeholder="example.com"></label>
+          <button id="net-resolve">Resolve DNS</button>
+          <span id="net-msg" class="muted" role="status"></span>
+        </div>
+        <pre id="net-geo-out" class="out" hidden></pre>
+        <div id="net-res-box" hidden>
+          <p class="muted small">Resolvers that disagree can mean the answer was tampered with (DoH, Iranian UDP resolvers, system DNS).</p>
+          <div class="table-wrap short">
+            <table id="net-res-table">
+              <thead><tr><th>IP</th><th>Answered by</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="row">
+            <button id="net-copy-ip" disabled>Copy IP</button>
+            <button id="net-use-ip" disabled>Use as FORCE IP</button>
+          </div>
+        </div>
+      </fieldset>
+      <div class="row">
+        <textarea id="sc-cidrs" rows="3" spellcheck="false" placeholder="CIDR ranges, one per line (e.g. 188.114.96.0/20)"></textarea>
+        <div class="col">
+          <label>Sample per range <input id="sc-count" type="number" min="1" max="5000" value="200"></label>
+          <label>Port <input id="sc-port" type="number" min="1" max="65535" value="443"></label>
+        </div>
+        <div class="col">
+          <label>SNI (optional) <input id="sc-sni" type="text" size="22"></label>
+          <label>Fragment <input id="sc-frag" type="text" size="14" list="frag-presets" value="5,94,1@2"></label>
+          <label>Workers <input id="sc-workers" type="number" min="1" max="256" value="64"></label>
+        </div>
+      </div>
+      <details class="adv" id="sc-adv">
+        <summary>Timeouts and retries</summary>
+        <div class="row">
+          <label>TCP timeout (s) <input id="sc-tcp-timeout" type="number" min="0.2" max="120" step="0.1" placeholder="5"></label>
+          <label>TLS timeout (s) <input id="sc-tls-timeout" type="number" min="0.2" max="120" step="0.1" placeholder="5"></label>
+          <label>TCP retries <input id="sc-tcp-retries" type="number" min="0" max="5" step="1" placeholder="1"></label>
+        </div>
+        <p class="muted small">Blank = the engine's defaults (5 s, 1 retry). Retries are extra connects for a host that never answered; 0 makes unreachable IPs cheap in large scans.</p>
+      </details>
+      <div class="row">
+        <label>Add ranges <select id="sc-preset"><option value="">(preset)</option></select></label>
+        <label><input id="sc-geo" type="checkbox"> Look up country / ISP</label>
+        <label><input id="sc-dead" type="checkbox"> Show unreachable</label>
+        <button id="sc-start" class="primary">Scan</button>
+        <button id="sc-cancel" disabled>Cancel</button>
+        <label>Saved scans <select id="sc-sessions"><option value="">(none)</option></select></label>
+        <button id="sc-load">Load</button>
+        <button id="sc-resume">Resume</button>
+        <label>Format <select id="sc-fmt"><option value="csv">CSV</option><option value="json">JSON</option></select></label>
+        <button id="sc-export">Export</button>
+        <button id="sc-save">Save…</button>
+        <button id="sc-clear" title="Clear the table (saved scans are kept)">Clear</button>
+        <button id="sc-to-sni">Alive IPs → SNI search</button>
+      </div>
+      <div class="row"><progress id="sc-progress" value="0" max="1"></progress><span id="sc-status" class="muted" role="status">idle</span></div>
+      <div class="table-wrap">
+        <table id="sc-table">
+          <thead><tr><th>IP</th><th>Port</th><th>ms</th><th>Jitter</th><th>TLS</th><th>Country</th><th>ISP</th><th>Info</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="row">
+        <button id="sc-copy-ip" disabled>Copy IP</button>
+        <button id="sc-use-ip" disabled>Use as FORCE IP</button>
+        <span class="muted small">click a row to select it; double-click copies its IP</span>
+      </div>
+      <textarea id="sc-out" rows="4" readonly spellcheck="false" placeholder="Export output appears here"></textarea>
+    </section>
+
+    <!-- SNI search -->
+    <section id="tab-sni" class="tab" role="tabpanel" hidden>
+      <div class="row">
+        <label>IPs <textarea id="sn-ips" rows="4" spellcheck="false" placeholder="Clean IPs, whitespace/comma separated"></textarea></label>
+        <label>SNIs / fronting hosts <textarea id="sn-snis" rows="4" spellcheck="false" placeholder="One per line"></textarea></label>
+      </div>
+      <div class="row">
+        <label><input id="sn-presets" type="checkbox"> Add built-in candidates</label>
+        <label><input id="sn-http" type="checkbox" checked> HTTP check</label>
+        <label>From saved scan <select id="sn-from-scan"><option value="">(none)</option></select></label>
+        <label>Port <input id="sn-port" type="number" min="1" max="65535" value="443"></label>
+        <label>Fragment <input id="sn-frag" type="text" size="14" list="frag-presets" value="5,94,1@2"></label>
+        <label>Workers <input id="sn-workers" type="number" min="1" max="256" value="32"></label>
+        <button id="sn-start" class="primary">Search</button>
+        <button id="sn-cancel" disabled>Cancel</button>
+        <label>Format <select id="sn-fmt"><option value="csv">CSV</option><option value="json">JSON</option></select></label>
+        <button id="sn-export">Export</button>
+        <button id="sn-save">Save…</button>
+        <button id="sn-clear" title="Clear the table (saved searches are kept)">Clear</button>
+      </div>
+      <div class="row"><progress id="sn-progress" value="0" max="1"></progress><span id="sn-status" class="muted" role="status">idle</span></div>
+      <div class="table-wrap">
+        <table id="sn-table">
+          <thead><tr><th>IP</th><th>SNI</th><th>TLS ms</th><th>TLS</th><th>HTTP</th><th>Info</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="row">
+        <button id="sn-copy" disabled>Copy IP + SNI</button>
+        <button id="sn-use-ip" disabled>Use IP as FORCE IP</button>
+        <span class="muted small">click a row to select it; double-click copies IP and SNI</span>
+      </div>
+      <textarea id="sn-out" rows="4" readonly spellcheck="false" placeholder="Export output appears here"></textarea>
+    </section>
+
+    <!-- WARP -->
+    <section id="tab-warp" class="tab" role="tabpanel" hidden>
+      <div class="row">
+        <span id="wp-status" class="muted" role="status">checking…</span>
+        <button id="wp-register">Register WARP device</button>
+        <span class="muted">Contacts Cloudflare's WARP API; the key is stored on this machine only.</span>
+      </div>
+      <div class="row">
+        <label>Endpoints to sample <input id="wp-count" type="number" min="1" max="500" value="60"></label>
+        <button id="wp-scan">Scan endpoints</button>
+        <button id="wp-cancel" disabled>Cancel</button>
+        <progress id="wp-progress" value="0" max="1"></progress>
+      </div>
+      <div class="table-wrap">
+        <table id="wp-table"><thead><tr><th>Endpoint</th><th>ms</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="row">
+        <label>Endpoint <input id="wp-endpoint" type="text" size="24" placeholder="click a row, or leave empty"></label>
+        <label>Format
+          <select id="wp-format"><option value="singbox">sing-box</option><option value="xray">Xray</option><option value="mihomo">Mihomo</option></select>
+        </label>
+        <button id="wp-config" class="primary">Generate config</button>
+      </div>
+      <textarea id="wp-out" rows="10" readonly spellcheck="false" placeholder="Outbound JSON appears here (contains your WireGuard key: treat it as a secret)"></textarea>
+    </section>
+
+    <!-- MASQUE / Psiphon (bring your own binaries) -->
+    <section id="tab-bridges" class="tab bridges" role="tabpanel" hidden>
+      <h3>MASQUE (Cloudflare WARP over HTTP/3 or HTTP/2)</h3>
+      <p class="muted">Needs the <b>sing-box-extended</b> fork (official sing-box has no MASQUE). Xray Forge runs your copy as a separate program.</p>
+      <div class="row">
+        <span id="ms-status" class="muted" role="status">checking…</span>
+      </div>
+      <div class="row">
+        <label>Binary <input id="ms-path" type="text" size="44" placeholder="absolute path to sing-box-extended"></label>
+        <button id="ms-browse">Browse…</button>
+        <button id="ms-set">Set</button>
+        <button id="ms-clear">Clear</button>
+        <button id="ms-download">Download…</button>
+      </div>
+      <div id="ms-dl"></div>
+      <div class="row">
+        <label><input id="ms-http2" type="checkbox"> HTTP/2 (TCP) instead of HTTP/3</label>
+        <label><input id="ms-l4" type="checkbox"> TCP-only proxy mode</label>
+        <label><input id="ms-ipv6" type="checkbox"> IPv6</label>
+        <label><input id="ms-bind" type="checkbox"> Bind to the physical interface</label>
+        <label>DNS
+          <select id="ms-dns">
+            <option value="auto">auto (DoH only if the system resolver is fake-IP)</option>
+            <option value="system">system resolver</option>
+            <option value="doh">DoH 1.1.1.1 / 8.8.8.8</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <label>Endpoint address <input id="ms-address" type="text" size="18" placeholder="default"></label>
+        <label>Port <input id="ms-port" type="number" min="1" max="65535" placeholder="default"></label>
+        <label>TLS server name <input id="ms-sni" type="text" size="22" placeholder="default"></label>
+        <label>Existing profile id <input id="ms-profile" type="text" size="22" placeholder="the fork creates one"></label>
+      </div>
+      <div class="row">
+        <label>Profile auth token <input id="ms-token" type="password" size="22" autocomplete="off" placeholder="optional; never saved or shown"></label>
+        <label>License key <input id="ms-license" type="password" size="22" autocomplete="off" placeholder="optional; never saved or shown"></label>
+        <label>DoH servers (IPs) <input id="ms-doh" type="text" size="26" placeholder="8.8.8.8, 1.1.1.1"></label>
+        <span class="muted">Register a profile on a network that can reach Cloudflare, then paste its id and token here if your network blocks registration.</span>
+      </div>
+      <div class="row">
+        <button id="ms-config">Show config</button>
+        <button id="ms-probe" class="primary">Test connection</button>
+        <button id="ms-cancel" disabled>Cancel</button>
+        <span id="ms-msg" class="muted" role="status"></span>
+      </div>
+      <textarea id="ms-out" rows="8" readonly spellcheck="false" placeholder="The client config appears here (tokens are never shown)"></textarea>
+
+      <h3>Psiphon (bring your own)</h3>
+      <p class="muted">Xray Forge ships no Psiphon binary or values. Use your own <b>ConsoleClient</b> and the client config you obtained from Psiphon Labs; its contents are never displayed.</p>
+      <div class="row">
+        <span id="ps-status" class="muted" role="status">checking…</span>
+      </div>
+      <div class="row">
+        <label>ConsoleClient <input id="ps-path" type="text" size="44" placeholder="absolute path to the executable"></label>
+        <button id="ps-browse">Browse…</button>
+        <button id="ps-set">Set</button>
+        <button id="ps-clear">Clear</button>
+      </div>
+      <div class="row">
+        <label>Config file <input id="ps-cfg" type="text" size="44" placeholder="absolute path to your client config (JSON)"></label>
+        <button id="ps-cfg-browse">Browse…</button>
+        <button id="ps-cfg-set">Set</button>
+        <button id="ps-cfg-clear">Clear</button>
+      </div>
+      <div class="row">
+        <button id="ps-probe" class="primary">Test connection</button>
+        <button id="ps-cancel" disabled>Cancel</button>
+        <span id="ps-msg" class="muted" role="status"></span>
+      </div>
+    </section>
+
+    <!-- MITM fronting -->
+    <section id="tab-cores" class="tab" role="tabpanel" hidden>
+      <p class="muted">Proxy cores are used for real health checks. The engine looks in your saved path, environment variables
+        (XRAY_CORE, SINGBOX_CORE, MIHOMO_CORE), v2rayN folders, ./bin and PATH.</p>
+      <div class="row">
+        <button id="co-detect" class="primary">Detect again</button>
+        <span id="co-msg" class="muted" role="status"></span>
+      </div>
+      <div id="co-dl"></div>
+      <div class="table-wrap">
+        <table id="co-table">
+          <thead><tr><th>Core</th><th>Found</th><th>Version</th><th>Source</th><th>Path</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="tab-mitm" class="tab" role="tabpanel" hidden>
+      <div class="row">
+        <fieldset id="mt-groups"><legend>Service families</legend></fieldset>
+        <span id="mt-min" class="muted"></span>
+      </div>
+      <div class="row">
+        <label><input id="mt-use-ca" type="checkbox"> Use the generated CA paths</label>
+        <button id="mt-build" class="primary">Build Xray config</button>
+        <label>Setup guide
+          <select id="mt-platform"><option value="windows">Windows</option><option value="android">Android</option></select>
+        </label>
+        <button id="mt-guide">Show guide</button>
+        <span id="mt-msg" class="muted" role="status"></span>
+      </div>
+      <div class="row">
+        <label>CA name <input id="mt-cn" type="text" size="24" value="Xray Forge MITM CA"></label>
+        <label>Restrict CA to domains (optional) <input id="mt-permitted" type="text" size="34" placeholder="google.com, youtube.com"></label>
+        <button id="mt-ca">Generate personal CA</button>
+        <span id="mt-ca-status" class="muted"></span>
+      </div>
+      <textarea id="mt-out" rows="14" readonly spellcheck="false" placeholder="Config or guide appears here"></textarea>
+    </section>
+    <section id="tab-about" class="tab" role="tabpanel" hidden>
+      <h2>Xray Forge</h2>
+      <p id="ab-version" class="muted" role="status">engine: connecting…</p>
+      <p>A config editor, converter and scanner for Xray, sing-box and mihomo. The interface runs on
+        an Electron shell; everything else is done by a local Python engine on this computer.</p>
+      <p>Free software under the <strong>GPL-3.0</strong> license, with no warranty. Source code, releases and bug reports:</p>
+      <ul>
+        <li><a href="https://github.com/rezaxr14/Xray_Forge" target="_blank" rel="noopener noreferrer">Project on GitHub</a></li>
+        <li><a href="https://github.com/rezaxr14/Xray_Forge/issues" target="_blank" rel="noopener noreferrer">Report a problem</a></li>
+      </ul>
+      <p class="muted">Proxy cores (xray, sing-box, mihomo, sing-box-extended, Psiphon) are separate programs with their own
+        licenses. Xray Forge starts them but does not include or modify them. Links open in your default browser.</p>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

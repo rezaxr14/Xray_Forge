@@ -2,6 +2,8 @@
 IP scanning, anti-hijack DNS resolution, CIDR sampling, and GeoIP lookup.
 """
 
+from __future__ import annotations
+
 import ipaddress
 import os
 import random
@@ -104,6 +106,68 @@ def resolve_dns_all(host: str) -> dict[str, list[str]]:
 _CC_CACHE: dict[str, str] = {}
 _CC_LOCK = threading.Lock()
 
+# (cc, isp) cache — keyed by ip
+_META_CACHE: dict[str, tuple[str, str]] = {}
+_META_LOCK = threading.Lock()
+
+
+def ip_meta(ip: str, timeout: float = 5.0) -> tuple[str, str]:
+    """Return (country_code, isp) for an IP, cached. ("","") on failure."""
+    if not ip:
+        return "", ""
+    with _META_LOCK:
+        if ip in _META_CACHE:
+            return _META_CACHE[ip]
+    cc, isp = "", ""
+    try:
+        d = fetch_json(
+            f"http://ip-api.com/json/{ip}?fields=status,countryCode,isp",
+            timeout=timeout)
+        if isinstance(d, dict):
+            v = d.get("countryCode")
+            if isinstance(v, str) and len(v) == 2 and v.isalpha():
+                cc = v.upper()
+            isp = str(d.get("isp") or "")[:40]
+    except Exception:
+        pass
+    with _META_LOCK:
+        _META_CACHE[ip] = (cc, isp)
+    return cc, isp
+
+
+def tcp_jitter(host: str, port: str, attempts: int = 3,
+               timeout: float = 3.0, retries: int = 1,
+               stop=None) -> tuple[float | None, float]:
+    """Best connect latency and jitter (max-min over successful samples).
+
+    ``attempts`` successful connects are sampled.  A host that has not
+    answered at all is retried ``retries`` more times (1 = the historical
+    "two tries" behaviour, 0 = a filtered host costs a single ``timeout``);
+    once it has answered, further failures only end the sampling.  ``stop``
+    (a ``threading.Event``) is checked before every connect.
+    """
+    import time
+    samples: list[float] = []
+    failures = 0
+    for _ in range(max(attempts, 1 + max(0, retries))):
+        if len(samples) >= attempts or (stop is not None and stop.is_set()):
+            break
+        t0 = time.perf_counter()
+        try:
+            s = socket.create_connection((host, int(port)), timeout=timeout)
+            s.close()
+        except OSError:
+            failures += 1
+            if not samples and failures > max(0, retries):
+                break
+            continue
+        samples.append((time.perf_counter() - t0) * 1000)
+    if not samples:
+        return None, 0.0
+    best = min(samples)
+    jitter = (max(samples) - min(samples)) if len(samples) > 1 else 0.0
+    return best, jitter
+
 
 def cc_of_ip(ip: str, timeout: float = 4.0) -> str:
     if not ip:
@@ -154,6 +218,9 @@ def fmt_geo(d: Any) -> str:
     return s
 
 
+GEO_FAILED = "lookup failed (all providers blocked?)"
+
+
 def geo_lookup(ip: str = "") -> str:
     urls = [
         f"https://ipwho.is/{ip}".rstrip("/"),
@@ -174,7 +241,7 @@ def geo_lookup(ip: str = "") -> str:
             continue
         if txt and "failed" not in txt:
             return txt
-    return "lookup failed (all providers blocked?)"
+    return GEO_FAILED
 
 
 def sample_cidr(cidr: str, count: int) -> list[str]:

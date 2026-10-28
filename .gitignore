@@ -65,7 +65,8 @@ target/
 venv/
 ENV/
 env/
-.venv
+.venv-lock/
+.venv/
 
 # IDE
 .idea/
@@ -87,3 +88,12 @@ settings.json
 
 # Xray Forge specific
 xray.log
+
+# Electron UI
+node_modules/
+electron/release/
+electron/engine-dist/
+out/
+
+# staged copies of LICENSE/NOTICE for the desktop installer (release workflow)
+electron/legal/

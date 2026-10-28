@@ -46,7 +46,7 @@ CI (`.github/workflows/ci.yml`) runs on ubuntu-latest and windows-latest ×
 Python 3.10/3.12/3.13/3.15, always with **bash** as the shell (PowerShell cannot
 expand `*.py` globs or run heredocs — never add `shell: pwsh` steps or
 heredocs outside a `bash` default). It compiles, lints, runs pytest, then
-CLI and GUI smoke tests.
+CLI smoke tests; the `ui` job runs the Electron end-to-end tests.
 
 ## Layout
 
@@ -166,6 +166,8 @@ tests/                   pytest suite (offline; see Testing rules)
 
 1. Update `__version__` in `xray_forge/__init__.py` and `pyproject.toml`.
 2. Ensure CI is green on `main`.
-3. Tag `vX.Y.Z` and push the tag — `.github/workflows/release.yml` builds
-   Windows/Linux single-file executables, runs the test suite, computes
-   SHA-256 checksums, and attaches everything to a GitHub Release.
+3. Rehearse with a pre-release tag (`vX.Y.Z-rc1`), check the artifacts (docs/local-agent-runbook.md,
+   Job 7), then tag `vX.Y.Z` and push it — `.github/workflows/release.yml` (pinned runner images)
+   builds the Windows/Linux single-file CLI zips and the desktop installer + AppImage, runs the test
+   suite and `tools/check_artifacts.py --smoke` on the unpacked app, computes SHA-256 checksums,
+   and attaches everything to a GitHub Release.

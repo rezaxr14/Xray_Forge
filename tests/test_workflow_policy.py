@@ -356,6 +356,7 @@ def _repo(tmp_path, *, release=None, pkg=None, lock=None):
     (tmp_path / "electron").mkdir()
     (tmp_path / "tools").mkdir()
     (tmp_path / "tools" / "check_version.py").write_text("# stub\n")
+    (tmp_path / "tools" / "check_artifacts.py").write_text("# stub\n")
     (tmp_path / ".github" / "workflows" / "release.yml").write_text(release or REL)
     pkg = pkg or {"devDependencies": {"electron": "^33.0.0"},
                   "build": {"win": {"target": ["nsis"]}, "linux": {"target": ["AppImage"]}}}
@@ -377,7 +378,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             artifact: cli-linux
     defaults:
       run:
@@ -391,10 +392,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: windows-latest
+          - os: windows-2022
             artifact: desk-win
             pattern: "*.exe"
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             artifact: desk-linux
             pattern: "*.AppImage"
     defaults:
@@ -403,6 +404,10 @@ jobs:
     steps:
       - if: startsWith(github.ref, 'refs/tags/v')
         run: python tools/check_version.py "$GITHUB_REF_NAME"
+      - name: Build the installer
+        run: npx electron-builder --publish never
+      - name: Check the unpacked app
+        run: python tools/check_artifacts.py --smoke electron/release/*-unpacked
   release:
     needs: [build, desktop]
     runs-on: ubuntu-latest
@@ -420,6 +425,51 @@ jobs:
             dist/*.sha256
             dist/*.sha256.sig
 """
+
+
+# ---- release builds: pinned runners and the unpacked-app check ------------------------
+
+def test_release_build_jobs_must_run_on_pinned_runner_images(tmp_path):
+    for floating, pinned in (("ubuntu-24.04", "ubuntu-latest"), ("windows-2022", "windows-latest")):
+        out = cw.check_release_consistency(_repo(tmp_path / pinned, release=REL.replace(floating, pinned)))
+        assert any(pinned in e and "pin" in e for e in out), (pinned, out)
+
+
+def test_every_release_build_job_is_checked_for_floating_runners(tmp_path):
+    only_cli = REL.replace("os: ubuntu-24.04\n            artifact: cli-linux", "os: ubuntu-latest\n            artifact: cli-linux")
+    out = cw.check_release_consistency(_repo(tmp_path / "a", release=only_cli))
+    assert any("'build'" in e and "ubuntu-latest" in e for e in out), out
+    only_desktop = REL.replace("os: windows-2022\n            artifact: desk-win", "os: windows-latest\n            artifact: desk-win")
+    out = cw.check_release_consistency(_repo(tmp_path / "b", release=only_desktop))
+    assert any("'desktop'" in e and "windows-latest" in e for e in out), out
+
+
+def test_the_release_job_itself_may_stay_on_a_floating_runner(tmp_path):
+    assert cw.check_release_consistency(_repo(tmp_path)) == []        # REL's release job uses ubuntu-latest
+
+
+def test_desktop_job_must_check_the_unpacked_app_after_building(tmp_path):
+    missing = REL.replace("      - name: Check the unpacked app\n        run: python tools/check_artifacts.py --smoke electron/release/*-unpacked\n", "")
+    out = cw.check_release_consistency(_repo(tmp_path / "a", release=missing))
+    assert any("check_artifacts" in e for e in out), out
+    before = REL.replace("      - name: Build the installer\n        run: npx electron-builder --publish never\n", "") \
+        .replace("      - name: Check the unpacked app", "      - name: Check the unpacked app", 1)
+    before = before.replace("      - name: Check the unpacked app\n        run: python tools/check_artifacts.py --smoke electron/release/*-unpacked\n",
+                            "      - name: Check the unpacked app\n        run: python tools/check_artifacts.py --smoke electron/release/*-unpacked\n"
+                            "      - name: Build the installer\n        run: npx electron-builder --publish never\n")
+    out = cw.check_release_consistency(_repo(tmp_path / "b", release=before))
+    assert any("after" in e and "electron-builder" in e for e in out), out
+
+
+def test_the_unpacked_app_check_must_start_the_engine(tmp_path):
+    out = cw.check_release_consistency(_repo(tmp_path, release=REL.replace("check_artifacts.py --smoke", "check_artifacts.py")))
+    assert any("--smoke" in e for e in out), out
+
+
+def test_the_unpacked_app_check_script_must_exist(tmp_path):
+    root = _repo(tmp_path)
+    (root / "tools" / "check_artifacts.py").unlink()
+    assert any("check_artifacts.py" in e and "does not exist" in e for e in cw.check_release_consistency(root))
 
 
 def test_consistent_repo_is_clean(tmp_path):

@@ -45,6 +45,10 @@ def matrix(job: str) -> list[dict]:
     return WORKFLOW["jobs"][job]["strategy"]["matrix"]["include"]
 
 
+LINUX = next(e["os"] for e in matrix("build") if e["os"].startswith("ubuntu"))
+WINDOWS = next(e["os"] for e in matrix("build") if e["os"].startswith("windows"))
+
+
 def entry(job: str, os_name: str) -> dict:
     return next(e for e in matrix(job) if e["os"] == os_name)
 
@@ -122,7 +126,7 @@ def ok(r: subprocess.CompletedProcess) -> subprocess.CompletedProcess:
 # ---------------------------------------------------------------------------
 
 def test_cli_package_linux_zip_has_executable_readme_and_license(run):
-    mx = entry("build", "ubuntu-latest")
+    mx = entry("build", LINUX)
     run.write(f"dist/{mx['exe']}", b"\x7fELF fake", mode=0o644)
     ok(run.step("build", "Package (Linux)", mx))
     z = zipfile.ZipFile(run.repo / "dist" / f"{mx['artifact']}.zip")
@@ -131,7 +135,7 @@ def test_cli_package_linux_zip_has_executable_readme_and_license(run):
 
 
 def test_cli_package_windows_zip_uses_stdlib_archiver(run):
-    mx = entry("build", "windows-latest")
+    mx = entry("build", WINDOWS)
     run.write(f"dist/{mx['exe']}", b"MZ fake")
     ok(run.step("build", "Package (Windows)", mx))
     z = zipfile.ZipFile(run.repo / "dist" / f"{mx['artifact']}.zip")
@@ -140,14 +144,14 @@ def test_cli_package_windows_zip_uses_stdlib_archiver(run):
 
 @pytest.mark.parametrize("missing", ["LICENSE", "NOTICE"])
 def test_cli_package_fails_when_a_legal_file_is_missing(run, missing):
-    mx = entry("build", "windows-latest")
+    mx = entry("build", WINDOWS)
     run.write(f"dist/{mx['exe']}", b"MZ fake")
     (run.repo / missing).unlink()
     r = run.step("build", "Package (Windows)", mx)
     assert r.returncode != 0 and missing in r.stderr, "an archive without its license must not be published"
 
 
-@pytest.mark.parametrize("os_name", ["ubuntu-latest", "windows-latest"])
+@pytest.mark.parametrize("os_name", [LINUX, WINDOWS])
 def test_cli_checksum_file_verifies_from_the_download_directory(run, os_name):
     mx = entry("build", os_name)
     run.write(f"dist/{mx['artifact']}.zip", b"zip bytes")
@@ -159,7 +163,7 @@ def test_cli_checksum_file_verifies_from_the_download_directory(run, os_name):
 
 
 def test_missing_artifact_fails_the_checksum_step_loudly(run):
-    mx = entry("build", "ubuntu-latest")
+    mx = entry("build", LINUX)
     (run.repo / "dist").mkdir()
     assert run.step("build", "Checksums", mx).returncode != 0
 
@@ -273,6 +277,48 @@ def test_license_staging_runs_before_the_installer_is_built():
     assert names.index("Stage license files for the installer") < names.index("Build the installer")
 
 
+UNPACKED = "Check the unpacked app (layout, license files, engine starts)"
+
+
+def _unpacked_tree(run: Runner, **kw) -> pathlib.Path:
+    from tests.test_check_artifacts import ENGINE_SRC, tree
+    for tool in ("check_artifacts.py", "smoke_engine.py"):
+        shutil.copy(ROOT / "tools" / tool, run.repo / "tools" / tool)
+    return tree(run.repo / "electron" / "release", "linux", engine_src=kw.pop("engine_src", ENGINE_SRC), **kw)
+
+
+def test_unpacked_app_check_step_passes_on_a_complete_tree_and_expands_the_glob(run):
+    d = _unpacked_tree(run)
+    r = ok(run.step("desktop", UNPACKED, entry("desktop", LINUX)))
+    assert "check_artifacts: ok" in r.stdout and d.name in r.stdout and "engine started" in r.stdout
+
+
+def test_unpacked_app_check_step_fails_when_the_engine_is_missing(run):
+    d = _unpacked_tree(run)
+    (d / "resources" / "engine" / "xray-forge-engine").unlink()
+    r = run.step("desktop", UNPACKED, entry("desktop", LINUX))
+    assert r.returncode != 0 and "engine missing" in r.stdout
+
+
+def test_unpacked_app_check_step_fails_when_the_packaged_engine_does_not_start(run):
+    from tests.test_check_artifacts import BROKEN_SRC
+    _unpacked_tree(run, engine_src=BROKEN_SRC)
+    r = run.step("desktop", UNPACKED, entry("desktop", LINUX))
+    assert r.returncode != 0 and "engine smoke test" in r.stdout
+
+
+def test_unpacked_app_check_step_fails_when_electron_builder_wrote_no_unpacked_dir(run):
+    for tool in ("check_artifacts.py", "smoke_engine.py"):
+        shutil.copy(ROOT / "tools" / tool, run.repo / "tools" / tool)
+    (run.repo / "electron" / "release").mkdir()
+    assert run.step("desktop", UNPACKED, entry("desktop", LINUX)).returncode != 0
+
+
+def test_unpacked_app_check_runs_between_the_build_and_the_checksums():
+    names = [s.get("name") for s in WORKFLOW["jobs"]["desktop"]["steps"]]
+    assert names.index("Build the installer") < names.index(UNPACKED) < names.index("Checksums")
+
+
 def _stub_npx(run: Runner) -> pathlib.Path:
     log = run.repo / "npx.log"
     stub = run.bin / "npx"
@@ -322,8 +368,8 @@ def test_tag_check_step_accepts_the_package_version_and_rejects_others(run, job)
 
 
 def test_desktop_checksums_keep_only_the_installer_of_that_platform(run):
-    for os_name, wanted, other in (("windows-latest", "XrayForge-2.1.0-win-x64.exe", "XrayForge-2.1.0-x86_64.AppImage"),
-                                   ("ubuntu-latest", "XrayForge-2.1.0-x86_64.AppImage", "XrayForge-2.1.0-win-x64.exe")):
+    for os_name, wanted, other in ((WINDOWS, "XrayForge-2.1.0-win-x64.exe", "XrayForge-2.1.0-x86_64.AppImage"),
+                                   (LINUX, "XrayForge-2.1.0-x86_64.AppImage", "XrayForge-2.1.0-win-x64.exe")):
         mx = entry("desktop", os_name)
         sub = Runner(pathlib.Path(tempfile.mkdtemp(prefix="dk")))
         sub.write(f"electron/release/{wanted}", b"installer")
@@ -338,7 +384,7 @@ def test_desktop_checksums_keep_only_the_installer_of_that_platform(run):
 
 def test_desktop_checksums_fail_when_no_installer_matches(run):
     run.write("electron/release/builder-debug.yml", b"junk")
-    assert run.step("desktop", "Checksums", entry("desktop", "windows-latest")).returncode != 0
+    assert run.step("desktop", "Checksums", entry("desktop", WINDOWS)).returncode != 0
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +398,7 @@ def test_release_globs_match_exactly_what_the_build_jobs_produce(run, gnupg_dirs
     merged = tmp_path / "merged"            # what download-artifact (merge-multiple) puts in dist/
     merged.mkdir()
 
-    for os_name in ("ubuntu-latest", "windows-latest"):          # CLI build job
+    for os_name in (LINUX, WINDOWS):          # CLI build job
         mx = entry("build", os_name)
         job_run = Runner(tmp_path / f"cli-{os_name}")
         job_run.write(f"dist/{mx['exe']}", b"bin")
@@ -364,8 +410,8 @@ def test_release_globs_match_exactly_what_the_build_jobs_produce(run, gnupg_dirs
             assert src.exists(), f"upload-artifact path {src.relative_to(job_run.repo)} is never produced"
             shutil.copy(src, merged / src.name)
 
-    installer_ext = {"windows-latest": "exe", "ubuntu-latest": "AppImage"}
-    for os_name in ("ubuntu-latest", "windows-latest"):          # desktop job
+    installer_ext = {WINDOWS: "exe", LINUX: "AppImage"}
+    for os_name in (LINUX, WINDOWS):          # desktop job
         mx = entry("desktop", os_name)
         job_run = Runner(tmp_path / f"desk-{os_name}")
         job_run.write(f"electron/release/XrayForge-{__version__}-x64.{installer_ext[os_name]}", b"installer")

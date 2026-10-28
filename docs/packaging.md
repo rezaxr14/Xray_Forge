@@ -47,11 +47,41 @@ Tags: `vX.Y.Z` must equal `xray_forge.__version__` and `pyproject.toml`
 GitHub release is created as a *pre-release*. Installers take their version
 from the tag (or from the package files when run from a branch).
 
+Release builds run on **pinned runner images** (`ubuntu-24.04`, `windows-2022`), not `-latest`:
+a Linux binary built on a newer glibc does not start on older distributions, and a runner
+migration (`ubuntu-latest` became Ubuntu 26.04 on 2026-10-19) must not change a release silently.
+`tools/check_workflows.py` fails the build of the repo if a release build job floats.
+
+After electron-builder, the `desktop` job runs `tools/check_artifacts.py --smoke
+electron/release/*-unpacked`: electron-builder's unpacked folder is exactly what the installer /
+AppImage is made from, so this checks that the engine and the app code are in it, that
+`resources/legal/LICENSE` and `NOTICE` are the repository's (GPL-3.0 text and source offer ship
+with every installer), that the Linux engine is executable, and that the packaged engine starts
+and answers (`tools/smoke_engine.py`). It does not install or launch the app window.
+
 Manual runs: `workflow_dispatch` only works once `release.yml` exists on the
 **default branch**; the run uses the workflow file of the ref you dispatch on,
-so keep both copies in sync until the feature branch is merged.
+so keep both copies in sync until the feature branch is merged. Without merging, rehearse by
+pushing a pre-release tag on the feature branch head (`v2.1.0-rc1`, the core must equal the
+package version): the tag runs the workflow file at that commit and creates a *pre-release*.
+
+### Known risks of the shipped artifacts (not yet checked on our build)
+
+* **Windows:** the installer is unsigned, so SmartScreen shows "Windows protected your PC": More
+  info -> Run anyway. Code signing needs a certificate (`CSC_*` secrets); none is configured.
+* **Linux AppImage:** needs FUSE 2 (`libfuse2`, `libfuse2t64` on Ubuntu 24.04) or run it with
+  `--appimage-extract-and-run`. On Ubuntu 24.04+ AppArmor can block Chromium's sandbox (unprivileged
+  user namespaces) and the app exits at start with a sandbox error. `--no-sandbox` works around it but
+  removes a security layer, so it is not set by default; allow the app in AppArmor or enable user
+  namespaces for it instead.
+* **Python 3.15** builds the engine (PyInstaller 6.22.3 worked locally on 3.15.2); PyYAML has no
+  3.15 wheel yet, so the lock install builds it from the hash-pinned sdist.
 
 ## Status
+
+**Re-verification needed.** The run below predates Python 3.15 / Node 24 builds, the pinned runner
+images, the hash-locked installs, the GPL relicense (new `LICENSE`/`NOTICE` in the installers) and the
+`check_artifacts` step. Rehearse with an `-rc` tag (see above) and runbook Job 7.
 
 Verified on real runners (run 39136895263, head 8efd63e): CLI build and
 desktop build on Windows and Linux are green; artifacts were a 88 MB Windows

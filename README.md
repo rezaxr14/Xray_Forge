@@ -136,9 +136,10 @@ ruff check --select E9,F63,F7,F82 .
 See [`AGENTS.md`](AGENTS.md) for the full contributor/agent handbook and
 [`ROADMAP.md`](ROADMAP.md) for the phased plan and current status.
 
-Releases are built automatically: pushing a `v*` tag runs the test suite,
-builds Windows/Linux single-file executables with PyInstaller, and attaches
-them (with SHA-256 checksums) to a GitHub Release.
+Releases are built automatically: pushing a `v*` tag runs the test suite and builds, on
+Windows and Linux, the desktop app (installer / AppImage) and the single-file command-line
+executable, then attaches them (with SHA-256 checksums) to a GitHub Release. The Windows installer
+is unsigned (SmartScreen will warn); see [`docs/packaging.md`](docs/packaging.md).
 
 ---
 

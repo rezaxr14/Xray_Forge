@@ -1,5 +1,5 @@
 """Engine methods.  Each is a thin adapter over ``xray_forge.core``; no
-business logic lives here so the CLI, the Tk GUI and the new UI stay in sync.
+business logic lives here so the CLI and the Electron UI stay in sync.
 """
 
 from __future__ import annotations
@@ -241,7 +241,7 @@ def build(emit, sources: SourceManager | None = None
                        want_fm: bool = True, dedup: bool = False) -> dict:
         """Apply the converter rules.  ``ip``/``port`` force one endpoint on
         every config; ``want_*`` choose what is injected (all false = the
-        Tk GUI's "IP only" mode).  ``names`` lists ``{name, line}`` for each
+        the converter's "IP only" mode).  ``names`` lists ``{name, line}`` for each
         output link, in output order."""
         if not isinstance(text, str):
             raise invalid_params("text must be a string")

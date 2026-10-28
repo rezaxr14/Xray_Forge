@@ -11,6 +11,9 @@ permissions:
   contents: read
 
 jobs:
+  # Release builds run on pinned runner images, not "-latest": a Linux binary built on a newer
+  # glibc does not start on older distributions, and a runner migration must never change a
+  # release silently (tools/check_workflows.py enforces this).
   build:
     name: Build ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -19,10 +22,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - os: windows-2022
             artifact: XrayForge-windows-x64
             exe: XrayForge.exe
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             artifact: XrayForge-linux-x64
             exe: XrayForge
     defaults:
@@ -125,11 +128,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - os: windows-2022
             artifact: XrayForge-desktop-windows-x64
             pattern: "*.exe"
             engine: xray-forge-engine.exe
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             artifact: XrayForge-desktop-linux-x64
             pattern: "*.AppImage"
             engine: xray-forge-engine
@@ -203,6 +206,11 @@ jobs:
           echo "installer version: $version"
           npx electron-builder --publish never -c.extraMetadata.version="$version"
           ls -la release
+
+      # electron-builder's *-unpacked folder is exactly what the installer / AppImage is made
+      # from: check the engine, the license files and that the packaged engine starts.
+      - name: Check the unpacked app (layout, license files, engine starts)
+        run: python tools/check_artifacts.py --smoke electron/release/*-unpacked
 
       - name: Checksums
         working-directory: electron/release

@@ -174,6 +174,14 @@ See `docs/engine-api.md`.
   - ✅ MASQUE/Psiphon/any SOCKS-probe cancel now also works while the page fetch is in flight
     (it used to wait out the timeout once the port was open); tested with a fake core that
     accepts and never answers. Not re-checked on a real tunnel.
+  - 🟡 4.5 Release builds: runner images pinned (`ubuntu-24.04`, `windows-2022`; enforced by
+    `check_workflows.py`), and a new `tools/check_artifacts.py --smoke` step checks electron-builder's
+    unpacked app (engine + app code present, Linux engine executable, GPL `LICENSE`/`NOTICE` shipped,
+    packaged engine starts). Tested on fake trees and through the workflow's real shell step
+    (`tests/test_check_artifacts.py`, `test_release_dryrun.py`). **Not run on a runner since these
+    changes** (the last real run, 39136895263, predates them): runbook Job 7 (`-rc` tag rehearsal) first.
+    Known, unchecked risks: unsigned Windows installer (SmartScreen), AppImage FUSE and Ubuntu 24.04+
+    AppArmor sandbox (`docs/packaging.md`).
   - ✅ `.gitattributes` pins `*.sh` to LF (a CRLF checkout broke `tools/update_locks.sh`
     under WSL).
 - ✅ About tab: version and engine protocol (from `engine.info`), license (GPL-3.0), project and
@@ -182,6 +190,12 @@ See `docs/engine-api.md`.
   checks the tab in the real renderer, and `app-shell.test.js` already covers the main-process
   handler (https only, `shell.openExternal`). **Not clicked in a packaged Electron app** (that would open
   the browser): do it once by hand.
+- ✅ Free daily configs: Subscriptions tab has a one-click **Patterniha-F** source
+  (`https://raw.githubusercontent.com/patterniha/Free-Configs/main/configs.txt`, `sub.presets` /
+  `sub.add_preset`). Adding creates a source only; the list is downloaded when the user presses Fetch and
+  is never bundled. A `#name` on a pasted URL becomes the source name. Saved sources are now listed when the
+  tab opens (they were invisible after a restart). Not exercised: a real download from GitHub; the list's
+  MIT license is the owner's statement, not checked here.
 - ✅ Cores tab: detect xray/sing-box/mihomo (saved path, env, v2rayN, ./bin, PATH), set/clear path; `health.run` explains a missing core.
 - ✅ Step 5: reach parity with the Tk GUI, then retire it (`app.py`, `ui/`,
   GUI tests, CI steps). In order:

@@ -23,6 +23,8 @@ GitHub runner; it catches the mistakes that are cheap to catch offline:
   runs on tags after both builds; the tag check runs in both build jobs;
 * ``electron/package-lock.json`` is in sync with ``electron/package.json``
   (``npm ci`` fails otherwise);
+* release build jobs run on pinned runner images and the desktop job checks the unpacked app
+  (``tools/check_artifacts.py --smoke``) after electron-builder;
 * a job that installs Playwright browsers runs on a pinned runner image (``ubuntu-24.04``),
   never a floating ``*-latest`` label (a new image can break ``--with-deps`` overnight);
 * every ``pip install`` is hash-locked: ``pip install --require-hashes -r X.lock``
@@ -62,6 +64,7 @@ SAFE_EXPR_ROOTS = {"matrix", "runner", "env", "strategy"}
 SHELLS_BANNED = {"pwsh", "powershell", "cmd"}
 RELEASE_ACTION = "softprops/action-gh-release"
 
+FLOATING_RUNNER_RE = re.compile(r"(?:^|-)latest(?:$|-)")
 HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 LOCK_PIN_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==([A-Za-z0-9][A-Za-z0-9.!+_-]*)\s*(?:;\s*(.*\S))?\s*$")
 SPEC_RE = re.compile(r"^(~=|==|!=|<=|>=|<|>)\s*([A-Za-z0-9][A-Za-z0-9.*!+_-]*)$")
@@ -239,7 +242,7 @@ def check_workflow_text(text: str, name: str) -> list[str]:
     for jname, job in _jobs(doc).items():
         if not any(re.search(r"\bplaywright\s+install", script) for _l, script in _job_runs(jname, job)):
             continue
-        floating = sorted(lbl for lbl in _runner_labels(job) if re.search(r"(?:^|-)latest(?:$|-)", lbl))
+        floating = sorted(lbl for lbl in _runner_labels(job) if FLOATING_RUNNER_RE.search(lbl))
         if floating:
             errs.append(f"{name}: job '{jname}' installs Playwright browsers on floating runner {', '.join(floating)}; "
                         "pin the image (e.g. ubuntu-24.04): a new -latest image can break 'playwright install --with-deps'")
@@ -434,6 +437,25 @@ def check_release_consistency(root: pathlib.Path) -> list[str]:
                  for s in _steps(jobs.get(job) or {}))
         if not ok:
             errs.append(f"release.yml: job '{job}' does not run tools/check_version.py on tags")
+
+    # release builds run on pinned runner images: a new "-latest" image can change glibc or the
+    # toolchain underneath a release (a Linux build must run on older distributions too)
+    for job in ("build", "desktop"):
+        for label in sorted(l for l in _runner_labels(jobs.get(job) or {}) if FLOATING_RUNNER_RE.search(l)):
+            errs.append(f"release.yml: job '{job}' builds on floating runner {label}; pin the image "
+                        "(e.g. ubuntu-24.04, windows-2022) so a runner migration cannot change a release")
+
+    # the unpacked app (what the installer is made from) is checked after it is built
+    steps = [(i, str(s.get("run", ""))) for i, s in enumerate(_steps(jobs.get("desktop") or {}))]
+    built = next((i for i, r in steps if "electron-builder" in r), None)
+    checked = next(((i, r) for i, r in steps if "check_artifacts.py" in r), None)
+    if checked is None:
+        errs.append("release.yml: job 'desktop' does not run tools/check_artifacts.py on the unpacked app")
+    else:
+        if built is None or checked[0] < built:
+            errs.append("release.yml: job 'desktop' must run tools/check_artifacts.py after the electron-builder step")
+        if "--smoke" not in checked[1]:
+            errs.append("release.yml: tools/check_artifacts.py must be run with --smoke so the packaged engine is started")
 
     # artifact names are unique across jobs
     seen: dict[str, str] = {}

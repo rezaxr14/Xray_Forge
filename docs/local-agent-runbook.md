@@ -144,7 +144,30 @@ through its SOCKS port with `--bind-interface` absent). Then `python tools/live_
 `auto` picked DoH on your fake-IP TUN setup and whether the probe now succeeds with HTTP/2
 (`masque probe --http2`) and without.
 
+## Job 7: release rehearsal (installer and AppImage)
+
+Proves the GitHub Actions release build and the artifacts it makes. Needs push rights to the repository.
+
+1. On the maintainer's say-so, from a clean checkout of the pushed `feat/roadmap-v2-1` head:
+   `git tag v2.1.0-rc1 && git push origin v2.1.0-rc1` (the version must equal `xray_forge.__version__`;
+   this creates a GitHub *pre-release*, not a release). Open the run in the Actions tab and wait for it.
+2. Report per job (`Build ubuntu-24.04`, `Build windows-2022`, `Desktop app ...`, `Attach binaries ...`):
+   green/red, duration, and for a red job the **exact** text of the failing step. Include the output of the
+   step "Check the unpacked app (layout, license files, engine starts)" for both platforms.
+3. Download the artifacts from the pre-release. Check each against its `.sha256` file
+   (`sha256sum -c` / `Get-FileHash`). Report the file names and sizes.
+4. **Windows:** run the installer (SmartScreen: More info -> Run anyway; it is unsigned). Report: installs?
+   app starts? The About tab must show the version, "GPL-3.0" and an engine line ("engine v... . 3 cores").
+   Click both About links once: each must open in your default browser (nothing opens inside the app).
+   Uninstall and report whether anything is left in the install folder.
+5. **Linux** (Ubuntu or WSL2 with WSLg): `chmod +x XrayForge-*.AppImage && ./XrayForge-*.AppImage`; if FUSE is
+   missing use `--appimage-extract-and-run`. Report the first lines of output verbatim, including any
+   sandbox error (Ubuntu 24.04+ AppArmor). Do **not** add `--no-sandbox` and report that it was needed instead.
+6. Delete the pre-release and the tag afterwards only if the maintainer says so.
+
+Never include secrets or signing keys in the report.
+
 ## What to send back
 
-One message containing: Job 0 summary, the lock files, the report JSON files, the build/installer notes,
-and the hand-testing list. The maintainer's assistant turns failures into fixes and tests.
+One message containing: Job 0 summary, the lock files, the report JSON files, the build/installer notes
+(Job 7 for the release rehearsal), and the hand-testing list. The maintainer's assistant turns failures into fixes and tests.

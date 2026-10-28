@@ -26,7 +26,7 @@ from xray_forge.core.parser import (
     export_to_sub, parse_target, tag_name_with_cc, valid_port,
 )
 from xray_forge.core.protocols import handler_for, supported_schemes
-from xray_forge.core.sub_source import SourceManager
+from xray_forge.core.sub_source import PRESETS, SourceManager
 from xray_forge.core.subscription import text_to_lines
 from xray_forge.engine import PROTOCOL_VERSION
 from xray_forge.engine.jobs import JobContext, JobManager
@@ -329,6 +329,18 @@ def build(emit, sources: SourceManager | None = None
         if not isinstance(url, str) or not url.lower().startswith(("http://", "https://")):
             raise invalid_params("url must start with http:// or https://")
         return src_mgr().add(url, name).to_dict()
+
+    @d.method("sub.presets")
+    def sub_presets() -> list[dict]:
+        have = {s.url for s in src_mgr().list_sources()}
+        return [{**p, "added": p["url"] in have} for p in PRESETS]
+
+    @d.method("sub.add_preset")
+    def sub_add_preset(id: str) -> dict:
+        preset = next((p for p in PRESETS if p["id"] == id), None)
+        if preset is None:
+            raise invalid_params(f"unknown preset {id!r}")
+        return src_mgr().add(preset["url"], preset["name"]).to_dict()
 
     @d.method("sub.remove")
     def sub_remove(url: str) -> bool:

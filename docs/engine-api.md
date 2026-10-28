@@ -34,6 +34,9 @@ cancels everything and shuts the engine down.
 | `config.export` | `lines`, `format` (`clash`/`singbox`/`sub`) | `{content, count}` |
 | `config.dedup` | `lines` | `{lines, removed}` |
 | `sub.list/add/remove/set_enabled/configs` | see code | source state |
+| `sub.presets` | none | `[{id, name, url, note, added}]`: built-in one-click sources (currently `patterniha-f`, the Patterniha-F free daily configs). Nothing is downloaded by listing or adding one |
+| `sub.add_preset` | `id` | the new (or existing) source; unknown ids give -32602. Adding never fetches: the list is downloaded only by `sub.fetch` |
+Note: `sub.add` treats a `#fragment` on the URL as the display name and stores the URL without it (a fragment is never sent to a server).
 | `sub.fetch` | `force`, `timeout` | job; result `{counts, total, removed}` |
 | `health.run` | `lines`, `workers` (1..64), `timeout` (0.5..120), `timeouts`, `throughput`, `core`, plus the optional anti-DPI options below | job; items are reports. The reports of the last 4 runs are kept by the engine |
 | `sub.check` | `workers`, `timeout`, `timeouts`, `throughput`, `core`, anti-DPI options | `{job, total, removed}`; `health.run` over the cached configs of every enabled source (errors with "no cached configs: fetch the sources first") |

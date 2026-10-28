@@ -554,7 +554,21 @@ $('#hc-keep').addEventListener('click', () => guarded($('#hc-status'), async () 
 }));
 
 // --------------------------------------------------------- subscriptions
+async function refreshPresets() {
+  const presets = await window.forge.call('sub.presets', {});
+  $('#sub-presets').replaceChildren(...presets.flatMap((p) => [
+    h('button', { 'data-preset': p.id, disabled: p.added, title: p.url,
+      onclick: () => guarded($('#sub-msg'), async () => {
+        await window.forge.call('sub.add_preset', { id: p.id });
+        say($('#sub-msg'), `${p.name} added: press "Fetch enabled" to download it`);
+        await refreshSubs();
+      }) }, p.added ? `${p.name} added` : `Add ${p.name}`),
+    h('span', { class: 'muted small' }, p.note),
+  ]));
+}
+
 async function refreshSubs() {
+  await refreshPresets();
   const subs = await window.forge.call('sub.list', {});
   $('#sub-table tbody').replaceChildren(...subs.map((s) =>
     h('tr', {},
@@ -566,6 +580,7 @@ async function refreshSubs() {
       h('td', {}, s.last_status || '—'),
       h('td', {}, h('button', { class: 'sub-remove', onclick: () => guarded($('#sub-msg'), async () => { await window.forge.call('sub.remove', { url: s.url }); await refreshSubs(); }) }, 'Remove')))));
 }
+onTab.subs = refreshSubs;
 $('#sub-add').addEventListener('click', () => guarded($('#sub-msg'), async () => {
   await window.forge.call('sub.add', { url: $('#sub-url').value.trim(), name: $('#sub-name').value.trim() });
   $('#sub-url').value = ''; $('#sub-name').value = '';

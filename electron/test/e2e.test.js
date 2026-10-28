@@ -314,6 +314,75 @@ test('MITM tab builds a config, shows the guide and generates a constrained CA',
   } finally { await close(); }
 });
 
+test('Subscriptions: one click adds the Patterniha-F preset, never fetches, and is not added twice', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.click('[data-tab=subs]');
+    await page.evaluate(() => {
+      window.__calls = [];
+      const orig = window.forge.call;
+      window.forge.call = (m, p) => { window.__calls.push(m); return orig(m, p); };
+    });
+    await page.waitForSelector('[data-preset="patterniha-f"]');
+    assert.match(await page.locator('#sub-presets').innerText(), /Patterniha-F/);
+    assert.match(await page.locator('#sub-presets').innerText(), /only when you press Fetch/i);
+    await page.click('[data-preset="patterniha-f"]');
+    await page.waitForFunction(() => /Patterniha-F/.test(document.querySelector('#sub-table tbody').textContent));
+    const row = await page.locator('#sub-table tbody tr').first().innerText();
+    assert.match(row, /raw\.githubusercontent\.com\/patterniha\/Free-Configs\/main\/configs\.txt/);
+    assert.equal(await page.locator('#sub-table tbody tr').count(), 1);
+    // the button now says it is added and cannot add a second copy
+    await page.waitForFunction(() => document.querySelector('[data-preset="patterniha-f"]').disabled);
+    assert.match(await page.locator('[data-preset="patterniha-f"]').innerText(), /added/i);
+    const calls = await page.evaluate(() => window.__calls);
+    assert.ok(calls.includes('sub.add_preset'));
+    assert.ok(!calls.includes('sub.fetch'), `adding must not fetch: ${calls}`);
+    // removing the source re-enables the button
+    await page.click('#sub-table .sub-remove');
+    await page.waitForFunction(() => !document.querySelector('[data-preset="patterniha-f"]').disabled);
+    assert.equal(await page.locator('#sub-table tbody tr').count(), 0);
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
+test('Subscriptions: saved sources and the preset button state survive a restart', opts, async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'xf-home-'));
+  const first = await launch({ home });
+  try {
+    await first.page.click('[data-tab=subs]');
+    await first.page.waitForSelector('[data-preset="patterniha-f"]');
+    await first.page.click('[data-preset="patterniha-f"]');
+    await first.page.waitForFunction(() => document.querySelectorAll('#sub-table tbody tr').length === 1);
+    await first.page.fill('#sub-url', 'https://example.invalid/mine.txt');
+    await first.page.click('#sub-add');
+    await first.page.waitForFunction(() => document.querySelectorAll('#sub-table tbody tr').length === 2);
+  } finally { await first.close(); }
+  const second = await launch({ home });
+  try {
+    await second.page.click('[data-tab=subs]');
+    await second.page.waitForFunction(() => document.querySelectorAll('#sub-table tbody tr').length === 2);
+    const rows = await second.page.locator('#sub-table tbody').innerText();
+    assert.match(rows, /Patterniha-F/);
+    assert.match(rows, /example\.invalid\/mine\.txt/);
+    await second.page.waitForFunction(() => document.querySelector('[data-preset="patterniha-f"]').disabled);
+    assert.deepEqual(second.problems, []);
+  } finally { await second.close(); }
+});
+
+test('Subscriptions: a #name on a pasted URL becomes the source name', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.click('[data-tab=subs]');
+    await page.fill('#sub-url', 'https://example.invalid/list.txt#My%20List');
+    await page.click('#sub-add');
+    await page.waitForFunction(() => /My List/.test(document.querySelector('#sub-table tbody').textContent));
+    const row = await page.locator('#sub-table tbody tr').first().innerText();
+    assert.match(row, /https:\/\/example\.invalid\/list\.txt/);
+    assert.doesNotMatch(row, /#My/);
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});
+
 test('About tab shows the real version, the license and https links that open outside the app', opts, async () => {
   const { page, problems, close } = await launch();
   try {

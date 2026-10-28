@@ -22,7 +22,7 @@ import urllib.request
 from dataclasses import dataclass, field, asdict
 
 from xray_forge.core.settings import data_dir
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urldefrag, urlsplit
 
 from xray_forge.core.subscription import text_to_lines, MAX_SUB_BYTES
 from xray_forge.core.dedup import dedup_configs
@@ -32,6 +32,15 @@ from xray_forge.core.log import get_logger
 log = get_logger(__name__)
 
 USER_AGENT = "xray-forge/2.1-subscriber"
+
+# One-click sources offered in the UI.  Adding one only creates a source: nothing is
+# downloaded until the user fetches, and no content is ever bundled with the app.
+PRESETS: tuple[dict, ...] = (
+    {"id": "patterniha-f", "name": "Patterniha-F",
+     "url": "https://raw.githubusercontent.com/patterniha/Free-Configs/main/configs.txt",
+     "note": "Free daily configs published by patterniha on GitHub. Downloaded from GitHub only when you press "
+             "Fetch; the configs are public, so check them before trusting them."},
+)
 
 
 @dataclass
@@ -87,11 +96,15 @@ class SourceManager:
 
     # -------------------------------------------------------------- source
     def add(self, url: str, name: str = "") -> Source:
+        """Add a source.  A ``#fragment`` is never sent to a server, so it is used as the
+        display name (when none is given) and dropped from the stored URL."""
+        url, frag = urldefrag(url.strip())
+        name = name or unquote(frag).strip() or url
         with self._lock:
             for s in self.sources:
                 if s.url == url:
                     return s
-            src = Source(url=url.strip(), name=name or url.strip())
+            src = Source(url=url, name=name)
             self.sources.append(src)
             self._save()
             return src

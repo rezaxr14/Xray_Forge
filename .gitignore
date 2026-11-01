@@ -97,3 +97,6 @@ out/
 
 # staged copies of LICENSE/NOTICE for the desktop installer (release workflow)
 electron/legal/
+
+# web app build output
+web/dist/

@@ -312,7 +312,9 @@ def _parse_ss(line: str, parts) -> Outbound | None:
     for k, v in parse_qsl(parts.query, keep_blank_values=True):
         params.setdefault(k.lower(), v)
     name = unquote(parts.fragment) or ""
-    userinfo = parts.username or ""
+    # the whole userinfo: parts.username stops at the first ":", which would cut a plain
+    # "method:password" pair down to the method
+    userinfo = parts.netloc.rpartition("@")[0] if "@" in parts.netloc else ""
     if parts.netloc and "@" not in parts.netloc:
         # legacy: whole netloc is base64 of method:password@host:port
         try:

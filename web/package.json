@@ -1,0 +1,11 @@
+{
+  "name": "xray-forge-web",
+  "private": true,
+  "type": "module",
+  "description": "Xray Forge web app (GitHub Pages). No dependencies: plain ES modules.",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "build": "node scripts/build.mjs"
+  },
+  "license": "GPL-3.0-only"
+}

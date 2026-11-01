@@ -1,10 +1,37 @@
 # ⚡ Xray Forge (Modular Edition)
 
 [![CI](https://github.com/rezaxr14/Xray_Forge/actions/workflows/ci.yml/badge.svg)](https://github.com/rezaxr14/Xray_Forge/actions/workflows/ci.yml)
+[![Web app](https://github.com/rezaxr14/Xray_Forge/actions/workflows/pages.yml/badge.svg)](https://github.com/rezaxr14/Xray_Forge/actions/workflows/pages.yml)
+
+**Try it without installing anything: <https://rezaxr14.github.io/Xray_Forge/>** (works offline once opened, and can be installed from the browser like an app).
+
+<p align="center">
+  <img src="docs/screenshots/configs-dark.png" alt="Xray Forge web app: config list with the editor open" width="860">
+</p>
 
 A full-featured, modular Python utility for managing, fixing, testing, and exporting **VLESS / VMess / Trojan / Shadowsocks / Hysteria2 / TUIC / WireGuard-WARP** proxy configurations — with DPI-resistant probing, real core integration (Xray-core / sing-box / Mihomo), exit-country analytics, resumable IP scanning, a staged subscription health-check pipeline, and multi-format export.
 
 > 🇮🇷 Designed with anti-DPI and censorship-resistance in mind: fragmented ClientHello probes, fake SNI, domain fronting, a local MITM-DomainFronting generator, DoH-over-IP DNS, and real-tunnel exit-IP detection.
+
+---
+
+## 🌐 Web app (no install)
+
+The same config engine, ported to dependency-free JavaScript, runs entirely in your browser. Nothing is uploaded; there is no server, account or database. It is a PWA: it works offline after the first visit and can be installed from the browser menu on desktop and phones.
+
+| Dark, desktop | Light, desktop | Phone |
+|---|---|---|
+| <img src="docs/screenshots/export-dark.png" alt="Export dialog" width="320"> | <img src="docs/screenshots/convert-light.png" alt="Convert screen" width="320"> | <img src="docs/screenshots/mobile-editor.png" alt="Editor on a phone" width="160"> <img src="docs/screenshots/mobile-list.png" alt="Config list on a phone" width="160"> |
+
+**Works in the browser:** parse and edit links, bulk convert (fingerprint, cipher suites, fragment, naming, endpoint override), de-duplication, export to Clash / Mihomo, sing-box and base64 subscriptions, plain and base64 subscriptions (from a URL the server allows, or pasted), and the MITM-fronting config and guide.
+
+**Needs the desktop app:** health checks, IP and SNI scanners, WARP / MASQUE / Psiphon and core management. Browsers cannot start programs or open raw sockets, so these screens say so instead of pretending.
+
+The JavaScript engine reproduces the Python engine's output (checked in `web/test/engine.test.mjs`). Details and known differences: [docs/web-app.md](docs/web-app.md).
+
+```bash
+cd web && npm test && npm run build   # Node 22+, no dependencies; output in web/dist
+```
 
 ---
 
@@ -14,6 +41,7 @@ A full-featured, modular Python utility for managing, fixing, testing, and expor
 Xray_Forge/
 ├── Xray_Forge.py             # root launcher (CLI) → xray_forge.cli:main
 ├── electron/                 # desktop app (Electron UI over the engine, JSON-RPC on stdio)
+├── web/                      # browser app (GitHub Pages): JS port of the config engine + PWA UI
 ├── AGENTS.md                 # instructions for AI agents / contributors
 ├── ROADMAP.md                # phased plan + status
 ├── pyproject.toml            # pip-installable package config (py ≥ 3.10)

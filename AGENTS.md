@@ -38,6 +38,9 @@ python tools/check_workflows.py
 # Python deps: edit requirements.txt / requirements-ci.in, then regenerate both locks
 tools/update_locks.sh        # needs uv + network; workflows install with --require-hashes
 
+# web app (Node 22+, no dependencies)
+(cd web && npm test && npm run build)
+
 # desktop app tests (Node 22+; Playwright for the end-to-end tests)
 cd electron && npm test
 ```
@@ -82,6 +85,7 @@ xray_forge/
     settings.py          settings.json (core paths) + data_dir() (~/.xray_forge)
     dedup.py             config de-duplication
 electron/                desktop app (main/preload/files.js, renderer/, test/)
+web/                     browser app for GitHub Pages: JS port of core/ + PWA UI (docs/web-app.md)
 tests/                   pytest suite (offline; see Testing rules)
 .github/workflows/       ci.yml, release.yml (PyInstaller builds + checksums)
 ```

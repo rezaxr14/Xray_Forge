@@ -113,3 +113,11 @@ def test_reality_fields_on_model():
     assert t.short_id == "6ba85179"
     assert t.flow == "xtls-rprx-vision"
     assert t.is_reality()
+
+
+def test_plain_ss_userinfo_keeps_method_and_password():
+    from xray_forge.core.parser import parse_target
+    o = parse_target("ss://aes-256-gcm:seekrit@198.51.100.7:8388#n")
+    assert (o.ss_method, o.credential, o.host, o.port) == ("aes-256-gcm", "seekrit", "198.51.100.7", "8388")
+    o = parse_target("ss://aes-256-gcm:p%40ss%3Aword@h.example.com:1#n")
+    assert (o.ss_method, o.credential) == ("aes-256-gcm", "p@ss:word")

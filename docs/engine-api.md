@@ -50,6 +50,17 @@ Note: `sub.add` treats a `#fragment` on the URL as the display name and stores t
 | `sni.presets` / `sni.sessions` / `sni.get` / `sni.export` | – / `session` | saved SNI data |
 | `net.resolve` | `host` (domain; an IP literal is echoed back) | `{host, answers:[{ip, sources:[...]}]}`; DoH, Iranian UDP resolvers and system DNS, so disagreeing answers reveal tampering. Blocking (several seconds): requests run concurrently, so other calls are not held up |
 | `net.geo` | `ip` (IPv4/IPv6/domain; empty = this machine's public IP) | `{query, text, ok}`; `ok` is false when every provider failed. The value is validated because it is placed in provider URLs |
+| `net.info` | – | `{platform, admin}`; whether this process has the rights to change system DNS/proxy settings (administrator/root) |
+| `net.interfaces` | – | `{interfaces:[{id, name, description}]}` of active networks, read from the system (`Get-NetAdapter`, `networksetup`, `ip link`) |
+| `net.dns.presets` | – | `{categories, presets, custom}`: the built-in catalog (ads, privacy, malware, family, Iran anti-sanction) plus the user's saved entries from `~/.xray_forge/net_custom.json` |
+| `net.dns.current` | `interface` | `{servers, automatic}`; `automatic` is null on Windows, which cannot tell automatic from static |
+| `net.dns.apply` | `interface`, and exactly one of `preset` (+ `ipv6`), `saved` (name) or `servers` (1..4 IPs) | `{servers, previous, interface}`; changes the system. `interface` must be one `net.interfaces` returned; addresses are validated with `ipaddress`. Failures carry a hint such as "run as administrator" in the message |
+| `net.dns.reset` | `interface` | `{interface}`; back to automatic (DHCP) DNS and a flushed cache |
+| `net.dns.test` | optional `preset` / `saved` / `servers`, `timeout` (0.2..10); none given = the first IPv4 address of every catalog entry | `{results}`; times a plain UDP lookup of example.com. Blocking for a few seconds |
+| `net.dns.save` / `net.dns.delete` | `name`, `servers`, `note` / `name` | saved custom DNS entries |
+| `net.import` | `dns`, `proxies` (the JSON of the old Network-Config-Utility `dns_servers.json` / `proxies.json`) | `{dns, proxies, skipped}`; proxy credentials are dropped because the OS proxy setting cannot use them |
+| `net.proxy.get` / `net.proxy.set` / `net.proxy.disable` | – / `host`, `port` (1..65535), `kind` (`http`/`socks`) / – | `{current, saved}` / the applied values / `{enabled:false}`; the per-user system proxy (registry on Windows, `networksetup` on macOS, `gsettings` on GNOME) |
+| `net.proxy.save` / `net.proxy.delete` | `name`, `host`, `port`, `kind` / `name` | saved proxies |
 | `ui.settings_get` | – | `{settings}`: the Electron UI's saved form values (flat `{id: string/bool/number}`); unreadable or malformed entries are dropped |
 | `ui.settings_set` | `settings` | `{saved}`; replaces the saved settings (<= 200 keys `[a-z][a-z0-9_-]*`, string values <= 4096, finite numbers). Stored in `~/.xray_forge/ui_settings.json`, owner-only; separate from `settings.json` (core paths) |
 | `warp.status` | – | `{registered, device_id (12 chars), endpoint, ipv4, ipv6}`; never returns keys or tokens |

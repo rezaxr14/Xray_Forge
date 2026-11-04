@@ -501,7 +501,93 @@ def build_parser() -> argparse.ArgumentParser:
                         choices=["auto", "xray", "singbox", "mihomo"],
                         help="check non-VLESS/WS configs via a real core")
 
+    p_dns = sub.add_parser("dns", help="system DNS: catalog, speed test, apply, reset (needs admin rights to change)")
+    p_dns.add_argument("action", choices=["list", "interfaces", "current", "test", "apply", "reset"])
+    p_dns.add_argument("--interface", default="", help="interface id from 'dns interfaces'")
+    p_dns.add_argument("--preset", default=None, help="catalog id from 'dns list'")
+    p_dns.add_argument("--server", action="append", default=None, help="DNS server address (repeat for more)")
+    p_dns.add_argument("--ipv6", action="store_true", help="also use the preset's IPv6 addresses")
+
+    p_proxy = sub.add_parser("proxy", help="system proxy: show, set or turn off")
+    p_proxy.add_argument("action", choices=["show", "set", "off"])
+    p_proxy.add_argument("--host", default="")
+    p_proxy.add_argument("--port", default="")
+    p_proxy.add_argument("--kind", default="http", choices=["http", "socks"])
+
     return parser
+
+
+def cli_dns(args) -> int:
+    from xray_forge.core import dns_presets, dns_probe, sysnet
+    be = sysnet.backend()
+    try:
+        if args.action == "list":
+            for c in dns_presets.CATEGORIES:
+                print(f"\n{c['name']}")
+                for p in (x for x in dns_presets.PRESETS if x["category"] == c["id"]):
+                    print(f"  {p['id']:<24} {', '.join(p['v4'])}{'  (unverified)' if p['unverified'] else ''}")
+            return 0
+        if args.action == "interfaces":
+            for i in be.interfaces():
+                print(f"{i['id']}\t{i['name']}\t{i['description']}")
+            return 0
+        if args.action == "test":
+            if args.preset:
+                p = dns_presets.find(args.preset)
+                if not p:
+                    print(f"unknown preset: {args.preset}", file=sys.stderr)
+                    return 2
+                servers = dns_presets.servers_of(p)
+            else:
+                servers = sysnet.clean_servers(args.server) if args.server else [p["v4"][0] for p in dns_presets.PRESETS]
+            for r in sorted(dns_probe.probe_many(servers), key=lambda r: (r["ms"] is None, r["ms"] or 0)):
+                print(f"{r['server']:<18} {str(r['ms']) + ' ms' if r['ok'] else r['error']}")
+            return 0
+        if not args.interface:
+            print("--interface is required (see 'dns interfaces')", file=sys.stderr)
+            return 2
+        iface = be.find(args.interface)
+        if args.action == "current":
+            cur = be.get_dns(iface)
+            print(", ".join(cur["servers"]) or "automatic")
+        elif args.action == "reset":
+            be.reset_dns(iface)
+            print(f"{iface['name']}: DNS set to automatic")
+        else:
+            if args.preset:
+                p = dns_presets.find(args.preset)
+                if not p:
+                    print(f"unknown preset: {args.preset}", file=sys.stderr)
+                    return 2
+                servers = dns_presets.servers_of(p, args.ipv6)
+            else:
+                servers = sysnet.clean_servers(args.server)
+            be.set_dns(iface, servers)
+            print(f"{iface['name']}: DNS set to {', '.join(servers)}")
+    except (sysnet.NetConfigError, ValueError) as e:
+        print(f"error: {e}" + (f" ({e.hint})" if getattr(e, "hint", "") else ""), file=sys.stderr)
+        return 1
+    return 0
+
+
+def cli_proxy(args) -> int:
+    from xray_forge.core import sysnet
+    be = sysnet.backend()
+    try:
+        if args.action == "show":
+            cur = be.get_proxy()
+            print(f"{cur['kind']} proxy {cur['host']}:{cur['port']}" if cur["enabled"] else "proxy is off")
+        elif args.action == "off":
+            be.disable_proxy()
+            print("proxy turned off")
+        else:
+            h, p, k = sysnet.clean_proxy(args.host, args.port, args.kind)
+            be.set_proxy(h, p, k)
+            print(f"{k} proxy set to {h}:{p}")
+    except (sysnet.NetConfigError, ValueError) as e:
+        print(f"error: {e}" + (f" ({e.hint})" if getattr(e, "hint", "") else ""), file=sys.stderr)
+        return 1
+    return 0
 
 
 _NO_TK_GUI = ("The Tkinter GUI has been retired. Use the Xray Forge desktop app "
@@ -560,6 +646,10 @@ def main(argv: list[str] | None = None) -> int:
     elif cmd == "subs":
         cli_subs(args.action, args.url, args.name, args.top_n, args.outfile,
                  args.workers, args.timeout, args.no_throughput, args.core)
+    elif cmd == "dns":
+        return cli_dns(args)
+    elif cmd == "proxy":
+        return cli_proxy(args)
     elif cmd == "gui":
         print(_NO_TK_GUI, file=sys.stderr)
         return 2

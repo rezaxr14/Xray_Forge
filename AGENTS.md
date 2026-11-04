@@ -84,8 +84,13 @@ xray_forge/
     warp.py              pure-python X25519, WARP account API, endpoint scan
     settings.py          settings.json (core paths) + data_dir() (~/.xray_forge)
     dedup.py             config de-duplication
+    dns_presets.py       catalog of public DNS servers (ads, privacy, malware, family, Iran)
+    sysnet.py            change system DNS / proxy: Windows, macOS, Linux backends (argv lists, no shell)
+    netstore.py          saved DNS/proxy entries (~/.xray_forge/net_custom.json) + old-tool import
+    dns_probe.py         time a list of DNS servers
 electron/                desktop app (main/preload/files.js, renderer/, test/)
 web/                     browser app for GitHub Pages: JS port of core/ + PWA UI (docs/web-app.md)
+                         web/src/engine/dns-presets.mjs is generated from dns_presets.py by tools/gen_web_dns.py
 tests/                   pytest suite (offline; see Testing rules)
 .github/workflows/       ci.yml, release.yml (PyInstaller builds + checksums)
 ```

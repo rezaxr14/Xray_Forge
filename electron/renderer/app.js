@@ -63,6 +63,7 @@ document.querySelectorAll('nav [role=tab]').forEach((btn) => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('nav [role=tab]').forEach((b) => b.setAttribute('aria-selected', String(b === btn)));
     document.querySelectorAll('.tab').forEach((s) => { s.hidden = s.id !== `tab-${btn.dataset.tab}`; });
+    $('#page-title').textContent = btn.textContent;
     const hook = onTab[btn.dataset.tab];
     if (hook) guarded($('#engine-status'), hook);
   });
@@ -1102,6 +1103,167 @@ $('#mt-ca').addEventListener('click', () => guarded($('#mt-msg'), async () => {
   const r = await call('mitm.generate_ca', params);
   $('#mt-ca-status').textContent = `CA written: ${r.cert}${r.constrained ? ' (name-constrained)' : ''}`;
   say($('#mt-msg'), r.note);
+}));
+
+// ----------------------------------------------------------- dns and proxy
+// DNS catalog and system proxy.  The engine does the work (and needs administrator rights);
+// this tab only lists, tests and applies.  Faster servers float to the top after a speed test.
+const dnsUi = { cats: [], presets: [], custom: [], cat: 'ads', speed: new Map(), current: null };
+const ADMIN_NOTE = {
+  windows: 'Changing DNS or the proxy needs administrator rights. Close Xray Forge and start it again with "Run as administrator".',
+  macos: 'Changing DNS or the proxy needs an administrator account. Start Xray Forge from an admin user.',
+  linux: 'Changing DNS needs root rights (systemd-resolved) and the proxy needs a GNOME session. Start Xray Forge with sudo or allow it in polkit.',
+};
+
+function dnsServersOf(p) { return p.v4.concat($('#dns-v6').checked ? p.v6 : []); }
+function dnsIface() { return $('#dns-iface').value; }
+
+async function dnsCurrent() {
+  const el = $('#dns-current');
+  if (!dnsIface()) { say(el, 'No active network was found.'); return; }
+  const cur = await call('net.dns.current', { interface: dnsIface() });
+  dnsUi.current = cur;
+  say(el, cur.servers.length ? `Now using ${cur.servers.join(', ')}` : cur.automatic ? 'Now using the servers your network gives out (automatic).' : 'No DNS servers are set.');
+}
+
+async function dnsInterfaces() {
+  const sel = $('#dns-iface');
+  const keep = sel.value;
+  const r = await call('net.interfaces');
+  sel.replaceChildren(...r.interfaces.map((i) => h('option', { value: i.id }, i.description ? `${i.name} (${i.description})` : i.name)));
+  if (!r.interfaces.length) sel.append(h('option', { value: '' }, 'No active network found'));
+  if (r.interfaces.some((i) => i.id === keep)) sel.value = keep;
+  await dnsCurrent();
+}
+
+function dnsRows() {
+  const cat = dnsUi.cat;
+  let rows = cat === 'saved'
+    ? dnsUi.custom.map((c) => ({ key: { saved: c.name }, name: c.name, note: c.note || 'Saved by you', servers: c.servers, saved: true }))
+    : dnsUi.presets.filter((p) => cat === 'all' || p.category === cat)
+      .map((p) => ({ key: { preset: p.id }, name: p.name, note: p.note, servers: dnsServersOf(p), doh: p.doh, unverified: p.unverified }));
+  if (dnsUi.speed.size) {
+    const ms = (r) => { const t = dnsUi.speed.get(r.servers[0]); return t && t.ok ? t.ms : Infinity; };
+    rows = rows.slice().sort((a, b) => ms(a) - ms(b));
+  }
+  return rows;
+}
+
+function renderDns() {
+  $('#dns-cats').replaceChildren(...[['all', 'All'], ...dnsUi.cats.map((c) => [c.id, c.name]), ['saved', `Yours (${dnsUi.custom.length})`]].map(([id, label]) =>
+    h('button', { type: 'button', 'aria-pressed': String(dnsUi.cat === id), onclick: () => { dnsUi.cat = id; renderDns(); } }, label)));
+  const rows = dnsRows();
+  const list = $('#dns-presets');
+  if (!rows.length) {
+    list.replaceChildren(h('li', { class: 'empty' }, dnsUi.cat === 'saved' ? 'Nothing saved yet. Add your own servers below.' : 'Nothing in this group.'));
+    return;
+  }
+  list.replaceChildren(...rows.map((r) => {
+    const t = dnsUi.speed.get(r.servers[0]);
+    const speed = t ? h('span', { class: `pill ${t.ok ? 'ok' : 'bad'}`, title: t.ok ? 'time for one lookup' : t.error }, t.ok ? `${t.ms} ms` : t.error) : null;
+    return h('li', {},
+      h('div', { class: 'grow' },
+        h('div', { class: 'item-title' }, r.name, r.unverified ? h('span', { class: 'pill warn', title: 'Not re-checked against the provider; confirm the addresses on their site' }, 'check address') : null),
+        h('div', { class: 'mono small muted' }, r.servers.join('   ')),
+        r.note ? h('div', { class: 'small muted' }, r.note) : null,
+        r.doh ? h('div', { class: 'small muted' }, `Encrypted DNS: ${r.doh}`) : null),
+      speed,
+      h('button', { type: 'button', class: 'primary', onclick: () => guarded($('#dns-msg'), () => dnsApply(r)) }, 'Use'),
+      r.saved ? h('button', { type: 'button', 'aria-label': `Delete ${r.name}`, onclick: () => guarded($('#dns-msg'), async () => { await call('net.dns.delete', { name: r.name }); await dnsPresets(); }) }, 'Delete') : null);
+  }));
+}
+
+async function dnsPresets() {
+  const r = await call('net.dns.presets');
+  Object.assign(dnsUi, { cats: r.categories, presets: r.presets, custom: r.custom });
+  renderDns();
+}
+
+async function dnsApply(r) {
+  const out = await call('net.dns.apply', { interface: dnsIface(), ...r.key, ipv6: $('#dns-v6').checked });
+  say($('#dns-msg'), `${r.name} is now the DNS on ${out.interface}.`);
+  await dnsCurrent();
+}
+
+onTab.network = async () => {
+  const info = await call('net.info');
+  const banner = $('#dns-banner');
+  banner.hidden = info.admin;
+  banner.textContent = info.admin ? '' : (ADMIN_NOTE[info.platform] || ADMIN_NOTE.linux);
+  await dnsPresets();
+  await guarded($('#dns-msg'), dnsInterfaces);
+  await guarded($('#px-msg'), proxyRefresh);
+};
+
+$('#dns-refresh').addEventListener('click', () => guarded($('#dns-msg'), dnsInterfaces));
+$('#dns-iface').addEventListener('change', () => guarded($('#dns-msg'), dnsCurrent));
+$('#dns-v6').addEventListener('change', renderDns);
+$('#dns-reset').addEventListener('click', () => guarded($('#dns-msg'), async () => {
+  const out = await call('net.dns.reset', { interface: dnsIface() });
+  say($('#dns-msg'), `${out.interface} uses automatic DNS again.`);
+  await dnsCurrent();
+}));
+$('#dns-test').addEventListener('click', () => guarded($('#dns-msg'), async () => {
+  const servers = [...new Set(dnsRows().map((r) => r.servers[0]))].slice(0, 24);
+  if (!servers.length) { say($('#dns-msg'), 'Nothing to test in this group.'); return; }
+  say($('#dns-msg'), `Testing ${servers.length} servers…`);
+  const r = await call('net.dns.test', { servers });
+  dnsUi.speed = new Map(r.results.map((x) => [x.server, x]));
+  renderDns();
+  const ok = r.results.filter((x) => x.ok).length;
+  say($('#dns-msg'), `${ok} of ${r.results.length} answered. The fastest are listed first.`);
+}));
+$('#dns-save').addEventListener('click', () => guarded($('#dns-msg'), async () => {
+  const servers = [$('#dns-p1').value, $('#dns-p2').value].map((s) => s.trim()).filter(Boolean);
+  await call('net.dns.save', { name: $('#dns-name').value, servers });
+  say($('#dns-msg'), `Saved ${$('#dns-name').value.trim()}.`);
+  for (const id of ['#dns-name', '#dns-p1', '#dns-p2']) $(id).value = '';
+  dnsUi.cat = 'saved';
+  await dnsPresets();
+}));
+
+async function importJson(key) {
+  const r = await window.forge.openText({ kind: 'json', title: `Open ${key === 'dns' ? 'dns_servers.json' : 'proxies.json'}` });
+  if (!r) { say($('#dns-msg'), 'Cancelled.'); return; }
+  let data;
+  try { data = JSON.parse(r.text); } catch { say($('#dns-msg'), 'That file is not valid JSON.', true); return; }
+  const out = await call('net.import', { [key]: data });
+  say($('#dns-msg'), `Imported ${out.dns} DNS and ${out.proxies} proxy entries${out.skipped ? `; skipped ${out.skipped} that could not be read` : ''}.`);
+  await dnsPresets();
+  await proxyRefresh();
+}
+
+$('#dns-imp-dns').addEventListener('click', () => guarded($('#dns-msg'), () => importJson('dns')));
+$('#dns-imp-proxy').addEventListener('click', () => guarded($('#dns-msg'), () => importJson('proxies')));
+
+// system proxy
+async function proxyRefresh() {
+  const r = await call('net.proxy.get');
+  const c = r.current;
+  const st = $('#px-state');
+  st.textContent = c.enabled ? `${c.kind.toUpperCase()} ${c.host}:${c.port}` : 'off';
+  st.className = `pill ${c.enabled ? 'ok' : ''}`;
+  $('#px-saved').replaceChildren(...r.saved.map((s) => h('li', {},
+    h('div', { class: 'grow' }, h('div', { class: 'item-title' }, s.name), h('div', { class: 'mono small muted' }, `${s.kind.toUpperCase()} ${s.host}:${s.port}`)),
+    h('button', { type: 'button', onclick: () => { $('#px-host').value = s.host; $('#px-port').value = String(s.port); $('#px-kind').value = s.kind; } }, 'Fill in'),
+    h('button', { type: 'button', 'aria-label': `Delete ${s.name}`, onclick: () => guarded($('#px-msg'), async () => { await call('net.proxy.delete', { name: s.name }); await proxyRefresh(); }) }, 'Delete'))));
+}
+const proxyFields = () => ({ host: $('#px-host').value.trim(), port: $('#px-port').value.trim(), kind: $('#px-kind').value });
+$('#px-apply').addEventListener('click', () => guarded($('#px-msg'), async () => {
+  const r = await call('net.proxy.set', proxyFields());
+  say($('#px-msg'), `System proxy is on: ${r.kind.toUpperCase()} ${r.host}:${r.port}.`);
+  await proxyRefresh();
+}));
+$('#px-off').addEventListener('click', () => guarded($('#px-msg'), async () => {
+  await call('net.proxy.disable');
+  say($('#px-msg'), 'System proxy is off.');
+  await proxyRefresh();
+}));
+$('#px-save').addEventListener('click', () => guarded($('#px-msg'), async () => {
+  const f = proxyFields();
+  await call('net.proxy.save', { name: `${f.host}:${f.port}`, ...f });
+  say($('#px-msg'), 'Saved.');
+  await proxyRefresh();
 }));
 
 // ------------------------------------------------------- native file dialogs

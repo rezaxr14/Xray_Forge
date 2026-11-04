@@ -217,3 +217,5 @@ a.btn { text-decoration: none; color: inherit; }
 a.btn.primary { color: var(--accent-ink); }
 .row > select { width: auto; }
 .row > .check { min-height: 36px; }
+.steps { margin: 8px 0 12px; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+details > summary { cursor: pointer; padding: 6px 0; font-weight: 500; }

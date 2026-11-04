@@ -9,28 +9,50 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <h1>Xray Forge</h1>
-    <nav role="tablist">
-      <button role="tab" data-tab="configs" aria-selected="true">Configs</button>
-      <button role="tab" data-tab="convert" aria-selected="false">Convert</button>
-      <button role="tab" data-tab="health" aria-selected="false">Health check</button>
-      <button role="tab" data-tab="subs" aria-selected="false">Subscriptions</button>
-      <button role="tab" data-tab="scan" aria-selected="false">IP scanner</button>
-      <button role="tab" data-tab="sni" aria-selected="false">SNI search</button>
-      <button role="tab" data-tab="warp" aria-selected="false">WARP</button>
-      <button role="tab" data-tab="bridges" aria-selected="false">MASQUE / Psiphon</button>
-      <button role="tab" data-tab="mitm" aria-selected="false">MITM fronting</button>
-      <button role="tab" data-tab="cores" aria-selected="false">Cores</button>
-      <button role="tab" data-tab="about" aria-selected="false">About</button>
-    </nav>
-    <span id="settings-msg" class="bad-text small" role="status"></span>
-    <span id="engine-status" class="muted" aria-live="polite">engine: connecting…</span>
-  </header>
+  <svg class="sprite" aria-hidden="true" width="0" height="0"><defs>
+    <symbol id="i-configs" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></symbol>
+    <symbol id="i-convert" viewBox="0 0 24 24"><path d="M7 7h11l-3-3M17 17H6l3 3"/></symbol>
+    <symbol id="i-health" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3zM9 12l2 2 4-4"/></symbol>
+    <symbol id="i-subs" viewBox="0 0 24 24"><path d="M7 18a4 4 0 0 1-.5-7.97A5.5 5.5 0 0 1 17 8.5a4.75 4.75 0 0 1 .5 9.5H7z"/></symbol>
+    <symbol id="i-scan" viewBox="0 0 24 24"><path d="M12 12l6-6M12 21a9 9 0 1 1 9-9M12 17a5 5 0 1 1 5-5"/></symbol>
+    <symbol id="i-sni" viewBox="0 0 24 24"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-5-5"/></symbol>
+    <symbol id="i-network" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.5 3.5 5.5 3.5 9S14.5 18.5 12 21M12 3C9.5 5.5 8.5 8.5 8.5 12s1 6.5 3.5 9"/></symbol>
+    <symbol id="i-warp" viewBox="0 0 24 24"><path d="M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-bridges" viewBox="0 0 24 24"><path d="M13 3L5 14h6l-1 7 8-11h-6l1-7z"/></symbol>
+    <symbol id="i-mitm" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z"/></symbol>
+    <symbol id="i-cores" viewBox="0 0 24 24"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14"/></symbol>
+    <symbol id="i-about" viewBox="0 0 24 24"><path d="M12 8v.01M11 12h1v5h1M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"/></symbol>
+  </defs></svg>
+
+  <div class="app">
+    <div class="sidebar">
+      <div class="brand"><span class="logo" aria-hidden="true"></span><span>Xray Forge</span></div>
+      <nav role="tablist" aria-label="Sections">
+        <div class="group" role="presentation">Workspace</div>
+        <button role="tab" data-tab="configs" aria-selected="true"><svg class="ico" aria-hidden="true"><use href="#i-configs"/></svg>Configs</button>
+        <button role="tab" data-tab="convert" aria-selected="false"><svg class="ico" aria-hidden="true"><use href="#i-convert"/></svg>Convert</button>
+        <button role="tab" data-tab="subs" aria-selected="false"><svg class="ico" aria-hidden="true"><use href="#i-subs"/></svg>Subscriptions</button>
+        <div class="group" role="presentation">Find and test</div>
+        <button role="tab" data-tab="health" aria-selected="false"><svg class="ico" aria-hidden="true"><use href="#i-health"/></svg>Health check</button>
+        <button role="tab" data-tab="scan" aria-selected="false"><svg class="ico" aria-hidden="true"><use href="#i-scan"/></svg>IP scanner</button>
+        <button role="tab" data-tab="sni" aria-selected="false"><svg class="ico" aria-hidden="true"><use href="#i-sni"/></svg>SNI search</button>
+        <div class="group" role="presentation">This computer</div>
+        <button role="tab" data-tab="network" aria-selected="false"><svg class="ico" aria-hidden="true"><use href="#i-network"/></svg>DNS and proxy</button>
+        <div class="group" role="presentation">Tunnels</div>
+        <button role="tab" data-tab="warp" aria-selected="false"><svg class="ico" aria-hidden="true"><use href="#i-warp"/></svg>WARP</button>
+        <button role="tab" data-tab="bridges" aria-selected="false"><svg class="ico" aria-hidden="true"><use href="#i-bridges"/></svg>MASQUE / Psiphon</button>
+        <button role="tab" data-tab="mitm" aria-selected="false"><svg class="ico" aria-hidden="true"><use href="#i-mitm"/></svg>MITM fronting</button>
+        <div class="group" role="presentation">App</div>
+        <button role="tab" data-tab="cores" aria-selected="false"><svg class="ico" aria-hidden="true"><use href="#i-cores"/></svg>Cores</button>
+        <button role="tab" data-tab="about" aria-selected="false"><svg class="ico" aria-hidden="true"><use href="#i-about"/></svg>About</button>
+      </nav>
+      <div class="side-foot"><span id="settings-msg" class="bad-text small" role="status"></span><span id="engine-status" class="muted" aria-live="polite">engine: connecting…</span></div>
+    </div>
 
   <datalist id="frag-presets"></datalist>
 
   <main>
+    <h1 id="page-title">Configs</h1>
     <!-- Configs -->
     <section id="tab-configs" class="tab" role="tabpanel">
       <div class="row">
@@ -534,6 +556,68 @@
       </div>
       <textarea id="mt-out" rows="14" readonly spellcheck="false" placeholder="Config or guide appears here"></textarea>
     </section>
+    <!-- DNS and proxy -->
+    <section id="tab-network" class="tab" role="tabpanel" hidden>
+      <div id="dns-banner" class="banner" hidden></div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>DNS servers</h2>
+          <span class="grow"></span>
+          <label class="inline">Network <select id="dns-iface" aria-label="Network interface"></select></label>
+          <button id="dns-refresh" type="button">Refresh</button>
+        </div>
+        <p id="dns-current" class="muted" role="status">Pick a network to see its DNS servers.</p>
+        <p class="muted small">A different DNS server helps against blocking that happens at DNS level and blocks ad domains. It does not get past
+          blocking by IP address or by site name in the TLS handshake; use a config for that.</p>
+        <div class="seg" id="dns-cats" role="group" aria-label="Kind of DNS server"></div>
+        <ul id="dns-presets" class="plain-list"></ul>
+        <div class="row">
+          <label><input id="dns-v6" type="checkbox"> Also use IPv6 addresses</label>
+          <span class="grow"></span>
+          <button id="dns-test" type="button">Test speed</button>
+          <button id="dns-reset" type="button">Back to automatic</button>
+        </div>
+        <span id="dns-msg" class="muted" role="status"></span>
+      </div>
+
+      <div class="card">
+        <h2>Your own DNS servers</h2>
+        <div class="row">
+          <label>Name <input id="dns-name" type="text" size="16"></label>
+          <label>Primary <input id="dns-p1" type="text" size="16" placeholder="1.1.1.1"></label>
+          <label>Secondary (optional) <input id="dns-p2" type="text" size="16" placeholder="1.0.0.1"></label>
+          <button id="dns-save" type="button">Save</button>
+        </div>
+        <details class="adv">
+          <summary>Bring in the old DNS &amp; Proxy Changer files</summary>
+          <p class="muted small">Pick <code>dns_servers.json</code> and <code>proxies.json</code>. Proxy user names and passwords are not kept; the system proxy setting cannot use them.</p>
+          <div class="row">
+            <button id="dns-imp-dns" type="button">Open dns_servers.json…</button>
+            <button id="dns-imp-proxy" type="button">Open proxies.json…</button>
+          </div>
+        </details>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>System proxy</h2>
+          <span class="grow"></span>
+          <span id="px-state" class="pill">off</span>
+        </div>
+        <div class="row">
+          <label>Address <input id="px-host" type="text" size="18" placeholder="127.0.0.1"></label>
+          <label>Port <input id="px-port" type="text" size="6" placeholder="10809"></label>
+          <label>Type <select id="px-kind"><option value="http">HTTP</option><option value="socks">SOCKS</option></select></label>
+          <button id="px-apply" type="button" class="primary">Turn on</button>
+          <button id="px-off" type="button">Turn off</button>
+          <button id="px-save" type="button">Save this proxy</button>
+        </div>
+        <ul id="px-saved" class="plain-list"></ul>
+        <span id="px-msg" class="muted" role="status"></span>
+      </div>
+    </section>
+
     <section id="tab-about" class="tab" role="tabpanel" hidden>
       <h2>Xray Forge</h2>
       <p id="ab-version" class="muted" role="status">engine: connecting…</p>
@@ -548,6 +632,7 @@
         licenses. Xray Forge starts them but does not include or modify them. Links open in your default browser.</p>
     </section>
   </main>
+  </div>
   <script src="app.js"></script>
 </body>
 </html>

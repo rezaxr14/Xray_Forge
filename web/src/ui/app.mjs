@@ -6,16 +6,17 @@ import { createConvert } from './views/convert.mjs';
 import { createSubs } from './views/subs.mjs';
 import { createMitm } from './views/mitm.mjs';
 import { createAbout } from './views/about.mjs';
+import { createDns } from './views/dns.mjs';
 import { createDesktop, DESKTOP_IDS } from './views/desktop.mjs';
 
 const installPrompt = { event: null, onChange: () => {} };
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt.event = e; installPrompt.onChange(); });
 
 const NAV = [
-  ['configs', 'Configs', 'list'], ['convert', 'Convert', 'convert'], ['subs', 'Subscriptions', 'cloud'], ['mitm', 'MITM fronting', 'shield'],
+  ['configs', 'Configs', 'list'], ['convert', 'Convert', 'convert'], ['subs', 'Subscriptions', 'cloud'], ['dns', 'DNS servers', 'search'], ['mitm', 'MITM fronting', 'shield'],
 ];
 const DESKTOP = [['health', 'Health check', 'shield'], ['scanner', 'IP scanner', 'radar'], ['sni', 'SNI search', 'search'], ['warp', 'WARP and tunnels', 'lock'], ['cores', 'Cores', 'download']];
-const BOTTOM = [['configs', 'Configs', 'list'], ['convert', 'Convert', 'convert'], ['subs', 'Sources', 'cloud'], ['mitm', 'MITM', 'shield'], ['about', 'More', 'more']];
+const BOTTOM = [['configs', 'Configs', 'list'], ['convert', 'Convert', 'convert'], ['subs', 'Sources', 'cloud'], ['dns', 'DNS', 'search'], ['about', 'More', 'more']];
 
 async function main() {
   const info = await call('engine.info');
@@ -23,7 +24,7 @@ async function main() {
   const go = (id) => { location.hash = `#/${id}`; };
   const ctx = { info, go, installPrompt };
   const factories = {
-    configs: () => createConfigs(ctx), convert: () => createConvert(ctx), subs: () => createSubs(ctx), mitm: () => createMitm(ctx), about: () => createAbout(ctx),
+    configs: () => createConfigs(ctx), convert: () => createConvert(ctx), subs: () => createSubs(ctx), dns: () => createDns(ctx), mitm: () => createMitm(ctx), about: () => createAbout(ctx),
     ...Object.fromEntries(DESKTOP_IDS.map((id) => [id, () => createDesktop(id)])),
   };
   const get = (id) => { if (!views.has(id)) views.set(id, factories[id]()); return views.get(id); };

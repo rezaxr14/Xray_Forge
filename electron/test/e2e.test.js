@@ -1773,3 +1773,36 @@ test('Bridges tab: a finished download fills in the binary path and says so', op
     assert.deepEqual(problems, []);
   } finally { await close(); }
 });
+
+test('DNS and proxy tab: catalog, categories, speed order and saved entries', opts, async () => {
+  const { page, problems, close } = await launch();
+  try {
+    await page.click('[data-tab=network]');
+    await page.waitForSelector('#dns-presets li');
+    assert.equal(await page.textContent('#page-title'), 'DNS and proxy');
+    assert.match(await page.textContent('#dns-presets'), /AdGuard DNS.*94\.140\.14\.14/s);
+    await page.click('#dns-cats button:has-text("Anti-sanction")');
+    assert.match(await page.textContent('#dns-presets'), /Shecan.*178\.22\.122\.100/s);
+    assert.match(await page.textContent('#dns-presets'), /403\.online.*check address/s);
+    await page.click('#dns-v6');
+    await page.click('#dns-cats button:has-text("Privacy")');
+    assert.match(await page.textContent('#dns-presets'), /2606:4700:4700::1111/);
+    // a name, a server and a save; it shows up under "Yours"
+    await page.fill('#dns-name', 'Home router');
+    await page.fill('#dns-p1', '192.168.1.1');
+    await page.click('#dns-save');
+    await page.waitForFunction(() => /Home router/.test(document.querySelector('#dns-presets').textContent));
+    assert.match(await page.textContent('#dns-presets'), /192\.168\.1\.1/);
+    // bad input is explained, not swallowed
+    await page.fill('#dns-name', 'Bad');
+    await page.fill('#dns-p1', 'not-an-ip');
+    await page.click('#dns-save');
+    await page.waitForFunction(() => /not an IP address/.test(document.querySelector('#dns-msg').textContent));
+    // the proxy form validates before anything is applied
+    await page.fill('#px-host', 'bad host');
+    await page.fill('#px-port', '8080');
+    await page.click('#px-apply');
+    await page.waitForFunction(() => /host name or IP/.test(document.querySelector('#px-msg').textContent));
+    assert.deepEqual(problems, []);
+  } finally { await close(); }
+});

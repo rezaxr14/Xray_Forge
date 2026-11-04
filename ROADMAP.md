@@ -122,6 +122,15 @@ Still open from the review (next sprints):
 
 ---
 
+## Network settings (DNS and proxy) ✅
+
+Replaces the separate Network-Config-Utility tool.
+
+- ✅ Catalog of public DNS servers, system DNS and proxy changes for Windows/macOS/Linux, speed test, saved entries, import of the old tool's files, CLI `dns` / `proxy`, engine `net.*` methods.
+- ✅ Desktop app redesigned (Apple-style, light/dark); web app gets a DNS servers screen.
+- ⬜ The OS backends have been tested only with fake command runners. They need a run on real Windows, macOS and Linux machines.
+- ⬜ DoH/DoT setup on the system (only plain DNS addresses are applied today).
+
 ## Phase 7 — Electron UI 🟡
 
 Decision: keep the Python `core/` as the engine and replace Tk with an

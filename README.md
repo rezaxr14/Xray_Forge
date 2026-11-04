@@ -117,7 +117,26 @@ the engine. The old Tkinter GUI has been retired.
 | **Subscriptions** | Source manager, check all sources, best-N export, tagged lines |
 | **IP scanner** | Geo / DNS lookup, resumable CIDR scans (range presets, fragment spec), CSV/JSON export |
 | **SNI search** | (ip, sni) pairs your network lets through |
+| **DNS and proxy** | Pick a public DNS (ad blocking, privacy, malware filtering, family, Iranian anti-sanction), test which is fastest, apply it to a network adapter or reset it; set or clear the system proxy; saved entries; import from the old Network-Config-Utility |
 | **WARP · MITM · Cores** | WARP device and config, MITM-DomainFronting generator, proxy-core detection |
+
+The desktop app uses an Apple-style layout: translucent sidebar, grouped cards, light and dark themes that follow the system.
+
+<img src="docs/screenshots/desktop-network-dark.png" alt="Desktop app: DNS and proxy" width="860">
+
+**DNS and proxy.** Changing system DNS and proxy works on Windows (PowerShell, registry), macOS (`networksetup`)
+and Linux (`resolvectl`, GNOME `gsettings`) and needs administrator or root rights. It helps against
+DNS-level blocking and ads. It does not get past blocking by IP address or by site name in the TLS handshake. Also from the CLI:
+
+```bash
+python -m xray_forge dns list
+python -m xray_forge dns test --preset cloudflare --preset adguard
+python -m xray_forge dns apply --interface "Wi-Fi" --preset adguard
+python -m xray_forge dns reset --interface "Wi-Fi"
+python -m xray_forge proxy set --host 127.0.0.1 --port 10808 --kind socks
+```
+
+The iranian entries (Shecan, Electro, Begzar, Radar, 403) come from public lists; 403 is marked unverified. Check them yourself.
 
 ### 5. Real Core Bridge (probe through actual engines)
 - Auto-detects `xray` from v2rayN, PATH, env `XRAY_CORE`

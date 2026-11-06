@@ -88,7 +88,7 @@ def clean_proxy(host, port, kind) -> tuple[str, int, str]:
     return host.strip(), p, kind
 
 
-def _fail(what: str, code: int, out: str, err: str) -> NetConfigError:
+def _fail(what: str, code: int, out: str, err: str, platform: str = "") -> NetConfigError:
     text = (err or out or f"exit code {code}").strip().splitlines()
     msg = f"{what}: {text[0][:200] if text else code}"
     low = (err + out).lower()
@@ -96,7 +96,7 @@ def _fail(what: str, code: int, out: str, err: str) -> NetConfigError:
     if any(w in low for w in ("denied", "administrator", "privilege", "not permitted", "authoriz", "polkit", "access")):
         hint = {"windows": "Run Xray Forge as administrator.",
                 "macos": "Run with administrator rights (an admin account or sudo).",
-                }.get(platform_name(), "Run with root rights (sudo) or allow it in polkit.")
+                }.get(platform or platform_name(), "Run with root rights (sudo) or allow it in polkit.")
     return NetConfigError(msg, hint)
 
 
@@ -109,7 +109,7 @@ class Backend:
     def _ok(self, argv: list, what: str, timeout: float = 20.0) -> str:
         code, out, err = self.run(argv, timeout)
         if code != 0:
-            raise _fail(what, code, out, err)
+            raise _fail(what, code, out, err, self.name)
         return out
 
     def interfaces(self) -> list[dict]:
@@ -142,7 +142,7 @@ class Backend:
 
 # ---------------------------------------------------------------- Windows
 def _ps(script: str) -> list:
-    pre = "$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
+    pre = "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
     return ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", pre + script]
 
 
@@ -173,12 +173,14 @@ class WindowsBackend(Backend):
 
     def interfaces(self) -> list[dict]:
         out = self._ok(_ps("Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | "
-                           "Select-Object Name,InterfaceDescription,ifIndex | ConvertTo-Json -Compress"),
+                           "Select-Object Name,InterfaceDescription,ifIndex,HardwareInterface | ConvertTo-Json -Compress"),
                        "listing network adapters")
         rows = _aslist(_json(out))
-        return [{"id": str(int(r["ifIndex"])), "name": str(r.get("Name") or ""),
-                 "description": str(r.get("InterfaceDescription") or "")}
-                for r in rows if isinstance(r, dict) and str(r.get("ifIndex", "")).isdigit()]
+        found = [{"id": str(int(r["ifIndex"])), "name": str(r.get("Name") or ""),
+                  "description": str(r.get("InterfaceDescription") or ""),
+                  "hardware": r.get("HardwareInterface") is not False}
+                 for r in rows if isinstance(r, dict) and str(r.get("ifIndex", "")).isdigit()]
+        return sorted(found, key=lambda i: not i["hardware"])      # real adapters before tunnels and virtual ones
 
     def get_dns(self, iface: dict) -> dict:
         out = self._ok(_ps(f"Get-DnsClientServerAddress -InterfaceIndex {int(iface['id'])} | "
@@ -193,11 +195,15 @@ class WindowsBackend(Backend):
     def set_dns(self, iface, servers):
         quoted = ",".join(f"'{s}'" for s in servers)      # validated IP literals only
         self._ok(_ps(f"Set-DnsClientServerAddress -InterfaceIndex {int(iface['id'])} -ServerAddresses ({quoted});"
-                     "Clear-DnsClientCache"), "setting DNS servers")
+                     "try{Clear-DnsClientCache}catch{}"), "setting DNS servers")
+        now = self.get_dns(iface)["servers"]      # read it back: do not report success for a change that did not happen
+        if [x.lower() for x in now] != [x.lower() for x in servers]:
+            raise NetConfigError("Windows did not keep the new DNS servers",
+                                 "Run Xray Forge as administrator, then check the network again.")
 
     def reset_dns(self, iface):
         self._ok(_ps(f"Set-DnsClientServerAddress -InterfaceIndex {int(iface['id'])} -ResetServerAddresses;"
-                     "Clear-DnsClientCache"), "resetting DNS servers")
+                     "try{Clear-DnsClientCache}catch{}"), "resetting DNS servers")
 
     # --- proxy (per-user registry values, as the Windows settings page uses)
     def _winreg(self):

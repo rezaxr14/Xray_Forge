@@ -63,16 +63,34 @@ def test_clean_proxy():
 
 # ------------------------------------------------------------------ Windows
 def test_windows_lists_sets_and_resets_by_index():
-    run = Fake({"Get-NetAdapter": (0, json.dumps([{"Name": "Wi-Fi", "InterfaceDescription": "Intel", "ifIndex": 12}]), "")})
+    run = Fake({"Get-NetAdapter": (0, json.dumps([{"Name": "tun0", "InterfaceDescription": "Wintun", "ifIndex": 5, "HardwareInterface": False},
+                                                  {"Name": "Wi-Fi", "InterfaceDescription": "Intel", "ifIndex": 12, "HardwareInterface": True}]), ""),
+                "Get-DnsClientServerAddress": (0, json.dumps({"AddressFamily": 2, "ServerAddresses": ["1.1.1.1", "1.0.0.1"]}), "")})
     be = sysnet.WindowsBackend(run)
+    assert [i["name"] for i in be.interfaces()] == ["Wi-Fi", "tun0"]       # the real adapter comes first
     iface = be.find("12")
     assert iface["name"] == "Wi-Fi"
     be.set_dns(iface, ["1.1.1.1", "1.0.0.1"])
-    script = run.calls[-1][-1]
+    script = next(c[-1] for c in run.calls if "Set-DnsClientServerAddress" in c[-1])
+    assert "$ErrorActionPreference='Stop'" in script
     assert "-InterfaceIndex 12" in script and "('1.1.1.1','1.0.0.1')" in script and "Clear-DnsClientCache" in script
     assert run.calls[-1][0] == "powershell.exe"
     be.reset_dns(iface)
     assert "-ResetServerAddresses" in run.calls[-1][-1]
+
+
+def test_windows_reports_a_change_that_did_not_stick():
+    run = Fake({"Get-DnsClientServerAddress": (0, json.dumps({"AddressFamily": 2, "ServerAddresses": ["192.168.1.1"]}), "")})
+    with pytest.raises(sysnet.NetConfigError) as e:
+        sysnet.WindowsBackend(run).set_dns({"id": "12", "name": "Wi-Fi"}, ["1.1.1.1"])
+    assert "administrator" in e.value.hint
+
+
+def test_windows_access_denied_gets_the_administrator_hint():
+    run = Fake({"Set-DnsClientServerAddress": (1, "", "Set-DnsClientServerAddress : Access is denied.")})
+    with pytest.raises(sysnet.NetConfigError) as e:
+        sysnet.WindowsBackend(run).set_dns({"id": "12", "name": "Wi-Fi"}, ["1.1.1.1"])
+    assert "administrator" in e.value.hint.lower()
 
 
 def test_windows_single_adapter_json_object_and_unknown_interface():

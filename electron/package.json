@@ -56,9 +56,12 @@
     },
     "linux": {
       "target": [
-        "AppImage"
+        "AppImage",
+        "deb"
       ],
-      "category": "Network"
+      "category": "Network",
+      "maintainer": "Reza Nadimi <rezaxr14@gmail.com>",
+      "synopsis": "Xray config editor, tester and DNS switcher"
     }
   }
 }

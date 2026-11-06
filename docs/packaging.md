@@ -37,8 +37,8 @@ real machine, not reproduced in CI.
 ## Release
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`:
-`build` (CLI zips, as before) and `desktop` (Windows installer + Linux
-AppImage) must both pass before `release` attaches everything, with SHA-256
+`build` (CLI zips, as before), `desktop` (Windows installer + Linux
+AppImage and .deb), and `wheel` (a Python wheel) must all pass before `release` attaches everything, with SHA-256
 files and, when `GPG_PRIVATE_KEY` is configured, detached signatures.
 
 Tags: `vX.Y.Z` must equal `xray_forge.__version__` and `pyproject.toml`
@@ -149,3 +149,14 @@ are fixed; `tools/check_version.py --package` now reads the version from files.
   Uninstalling the app does not remove it.
 - The installers have not been launched by a human yet; CI only proves they
   build and that the bundled engine answers the smoke test.
+
+## Ways to install
+
+- Windows: `XrayForge-<version>-win-x64.exe` (installer).
+- Linux: `XrayForge-<version>-linux-x86_64.AppImage`, or the `.deb` (`sudo apt install ./XrayForge-*.deb`).
+- Python: the wheel from the release page, `pip install xray_forge-<version>-py3-none-any.whl`, or straight from the
+  repository, `pip install git+https://github.com/rezaxr14/Xray_Forge`. This gives the `xray-forge` command
+  (`xray-forge dns list`, `xray-forge serve`) without the desktop window. There is no PyPI upload yet.
+- macOS has no installer; use the pip route.
+
+The `.deb` target and the wheel job have not run on a real runner yet; push a `-rc` tag first (see above).

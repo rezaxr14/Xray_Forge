@@ -15,6 +15,7 @@ real runners shows that.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import os
 import pathlib
 import re
@@ -367,19 +368,22 @@ def test_tag_check_step_accepts_the_package_version_and_rejects_others(run, job)
     assert bad.returncode == 1 and "does not match" in bad.stdout
 
 
-def test_desktop_checksums_keep_only_the_installer_of_that_platform(run):
-    for os_name, wanted, other in ((WINDOWS, "XrayForge-2.1.0-win-x64.exe", "XrayForge-2.1.0-x86_64.AppImage"),
-                                   (LINUX, "XrayForge-2.1.0-x86_64.AppImage", "XrayForge-2.1.0-win-x64.exe")):
+def test_desktop_checksums_keep_only_the_installers_of_that_platform(run):
+    win, appimage, deb = "XrayForge-2.1.0-win-x64.exe", "XrayForge-2.1.0-linux-x64.AppImage", "XrayForge-2.1.0-linux-amd64.deb"
+    for os_name, wanted, others in ((WINDOWS, [win], [appimage, deb]), (LINUX, [appimage, deb], [win])):
         mx = entry("desktop", os_name)
         sub = Runner(pathlib.Path(tempfile.mkdtemp(prefix="dk")))
-        sub.write(f"electron/release/{wanted}", b"installer")
-        sub.write(f"electron/release/{other}", b"other platform")
+        for name in wanted:
+            sub.write(f"electron/release/{name}", b"installer")
+        for name in others:
+            sub.write(f"electron/release/{name}", b"other platform")
         sub.write("electron/release/builder-debug.yml", b"junk")
         sub.write("electron/release/win-unpacked/app.exe", b"junk")
         ok(sub.step("desktop", "Checksums", mx))
         out = sorted(p.name for p in (sub.repo / "out").iterdir())
-        assert out == sorted([wanted, wanted + ".sha256"]), out
-        ok(subprocess.run(["sha256sum", "-c", wanted + ".sha256"], cwd=sub.repo / "out", capture_output=True, text=True))
+        assert out == sorted(wanted + [w + ".sha256" for w in wanted]), out
+        for w in wanted:
+            ok(subprocess.run(["sha256sum", "-c", w + ".sha256"], cwd=sub.repo / "out", capture_output=True, text=True))
 
 
 def test_desktop_checksums_fail_when_no_installer_matches(run):
@@ -410,15 +414,23 @@ def test_release_globs_match_exactly_what_the_build_jobs_produce(run, gnupg_dirs
             assert src.exists(), f"upload-artifact path {src.relative_to(job_run.repo)} is never produced"
             shutil.copy(src, merged / src.name)
 
-    installer_ext = {WINDOWS: "exe", LINUX: "AppImage"}
+    installers = {WINDOWS: [f"XrayForge-{__version__}-win-x64.exe"],
+                  LINUX: [f"XrayForge-{__version__}-linux-x64.AppImage", f"XrayForge-{__version__}-linux-amd64.deb"]}
     for os_name in (LINUX, WINDOWS):          # desktop job
         mx = entry("desktop", os_name)
         job_run = Runner(tmp_path / f"desk-{os_name}")
-        job_run.write(f"electron/release/XrayForge-{__version__}-x64.{installer_ext[os_name]}", b"installer")
+        for name in installers[os_name]:
+            job_run.write(f"electron/release/{name}", b"installer")
         ok(job_run.step("desktop", "Checksums", mx))
         ok(job_run.step("desktop", SIGN, env={"GPG_PRIVATE_KEY": key, "GNUPGHOME": gnupg_dirs()}))
         for src in sorted((job_run.repo / "out").iterdir()):     # upload-artifact path: out/*
             shutil.copy(src, merged / src.name)
+
+    # wheel job: the wheel and its checksum (building it needs pip's isolated setuptools, so the file is written here)
+    wheel = f"xray_forge-{__version__}-py3-none-any.whl"
+    (merged / wheel).write_bytes(b"wheel")
+    (merged / (wheel + ".sha256")).write_text(hashlib.sha256(b"wheel").hexdigest() + "  " + wheel + "\n")
+    assert WORKFLOW["jobs"]["wheel"]["steps"][-1]["with"]["path"].strip() == "out/*"
 
     release_step = next(s for s in WORKFLOW["jobs"]["release"]["steps"] if "action-gh-release" in s.get("uses", ""))
     globs = [g.strip() for g in release_step["with"]["files"].splitlines() if g.strip()]
@@ -428,7 +440,8 @@ def test_release_globs_match_exactly_what_the_build_jobs_produce(run, gnupg_dirs
         assert any(fnmatch.fnmatch(n, pattern) for n in names), f"release glob {g} matches nothing; produced: {names}"
     orphans = [n for n in names if not any(fnmatch.fnmatch(n, g.split("/", 1)[1]) for g in globs)]
     assert orphans == [], f"files the jobs upload but the release never attaches: {orphans}"
-    assert len(names) == 12, names     # 2 zips + 2 installers, each with .sha256 and .sha256.sig
+    # 2 zips, Windows installer, AppImage and .deb (each with .sha256 and .sha256.sig), and the wheel with its .sha256
+    assert len(names) == 17, names
 
 
 def find_step_upload(job: str) -> list[str]:

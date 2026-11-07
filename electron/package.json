@@ -5,6 +5,7 @@
   "description": "Electron front end for the Xray Forge Python engine",
   "main": "main.js",
   "license": "GPL-3.0-only",
+  "homepage": "https://github.com/rezaxr14/Xray_Forge",
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",

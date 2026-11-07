@@ -369,7 +369,7 @@ def test_tag_check_step_accepts_the_package_version_and_rejects_others(run, job)
 
 
 def test_desktop_checksums_keep_only_the_installers_of_that_platform(run):
-    win, appimage, deb = "XrayForge-2.1.0-win-x64.exe", "XrayForge-2.1.0-linux-x64.AppImage", "XrayForge-2.1.0-linux-amd64.deb"
+    win, appimage, deb = "XrayForge-2.1.0-win-x64.exe", "XrayForge-2.1.0-linux-x86_64.AppImage", "XrayForge-2.1.0-linux-amd64.deb"
     for os_name, wanted, others in ((WINDOWS, [win], [appimage, deb]), (LINUX, [appimage, deb], [win])):
         mx = entry("desktop", os_name)
         sub = Runner(pathlib.Path(tempfile.mkdtemp(prefix="dk")))
@@ -415,7 +415,7 @@ def test_release_globs_match_exactly_what_the_build_jobs_produce(run, gnupg_dirs
             shutil.copy(src, merged / src.name)
 
     installers = {WINDOWS: [f"XrayForge-{__version__}-win-x64.exe"],
-                  LINUX: [f"XrayForge-{__version__}-linux-x64.AppImage", f"XrayForge-{__version__}-linux-amd64.deb"]}
+                  LINUX: [f"XrayForge-{__version__}-linux-x86_64.AppImage", f"XrayForge-{__version__}-linux-amd64.deb"]}
     for os_name in (LINUX, WINDOWS):          # desktop job
         mx = entry("desktop", os_name)
         job_run = Runner(tmp_path / f"desk-{os_name}")
